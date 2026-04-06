@@ -1,11 +1,7 @@
 # PolyDb
 
-PolyDb is a lightweight Java persistence framework for working with databases using annotations, automatic schema generation, repository-based queries, and migrations.
-
+PolyDb is a lightweight Java persistence framework for working with databases using annotations, automatic schema generation, repository-based queries, and migrations. 
 It is designed to keep the setup simple while still providing a structured and extensible way to map Java entities to database tables.
-
-**Project repository:** [https://repo.tnttastisch.de](https://repo.tnttastisch.de)
-
 ---
 
 ## Features
@@ -307,4 +303,3 @@ If you add new features, please include:
 - tests
 - documentation
 - example usage where appropriate
-```
