@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>de.tnttastisch</groupId>
+        <artifactId>polydb</artifactId>
+        <version>0.1.0-DEV</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>polydb-schema</artifactId>
+    <name>PolyDB :: Schema</name>
+    <description>
+        Entity annotation parsing, metadata models (EntityModel, FieldModel,
+        IndexModel), live database schema reading via JDBC DatabaseMetaData,
+        schema comparison (SchemaDiff) and change operation generation.
+    </description>
+
+    <dependencies>
+
+        <!-- Annotations + shared contracts -->
+        <dependency>
+            <groupId>de.tnttastisch</groupId>
+            <artifactId>polydb-core</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.reflections</groupId>
+            <artifactId>reflections</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>de.tnttastisch</groupId>
+            <artifactId>polydb-dialect</artifactId>
+        </dependency>
+
+        <!--
+            No extra runtime deps: schema reading uses java.sql.DatabaseMetaData
+            which is part of the JDK. JDBC driver is provided by the application.
+        -->
+
+    </dependencies>
+
+</project>

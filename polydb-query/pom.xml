@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>de.tnttastisch</groupId>
+        <artifactId>polydb</artifactId>
+        <version>0.1.0-DEV</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>polydb-query</artifactId>
+    <name>PolyDB :: Query</name>
+    <description>
+        Optional fluent query DSL: FindQuery, UpdateQuery, DeleteQuery,
+        Criteria, QueryExecutor, ResultMapper. All SQL is issued via
+        PreparedStatement – never string concatenation.
+    </description>
+
+    <dependencies>
+
+        <!-- Core annotations + config -->
+        <dependency>
+            <groupId>de.tnttastisch</groupId>
+            <artifactId>polydb-core</artifactId>
+        </dependency>
+
+        <!--
+            Dialect: query executor uses Dialect.limitClause() and
+            Dialect.quoteIdentifier() to remain database-agnostic.
+        -->
+        <dependency>
+            <groupId>de.tnttastisch</groupId>
+            <artifactId>polydb-dialect</artifactId>
+        </dependency>
+
+        <!-- Schema parsing for repository auto-generation -->
+        <dependency>
+            <groupId>de.tnttastisch</groupId>
+            <artifactId>polydb-schema</artifactId>
+        </dependency>
+
+        <!--
+            HikariCP: QueryExecutor.execute() borrows a connection from
+            the pool and returns it after query completion.
+        -->
+        <dependency>
+            <groupId>com.zaxxer</groupId>
+            <artifactId>HikariCP</artifactId>
+        </dependency>
+
+    </dependencies>
+
+</project>

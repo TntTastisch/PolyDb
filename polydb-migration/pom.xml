@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>de.tnttastisch</groupId>
+        <artifactId>polydb</artifactId>
+        <version>0.1.0-DEV</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>polydb-migration</artifactId>
+    <name>PolyDB :: Migration</name>
+    <description>
+        Versioned migration engine: SQL script scanning (V1__init.sql),
+        Java-based migrations, checksum validation, history table management
+        and deterministic ordered execution with optimistic locking.
+    </description>
+
+    <dependencies>
+
+        <!-- Core contracts + exceptions -->
+        <dependency>
+            <groupId>de.tnttastisch</groupId>
+            <artifactId>polydb-core</artifactId>
+        </dependency>
+
+        <!--
+            Dialect is needed so MigrationContext can expose the active
+            Dialect to Java-based Migration implementations.
+        -->
+        <dependency>
+            <groupId>de.tnttastisch</groupId>
+            <artifactId>polydb-dialect</artifactId>
+        </dependency>
+
+        <!--
+            HikariCP: the migration executor obtains connections from the
+            pool already configured in polydb-boot. Declared here so
+            MigrationContext can accept a DataSource parameter.
+            Scope compile – the pool is always present at runtime.
+        -->
+        <dependency>
+            <groupId>com.zaxxer</groupId>
+            <artifactId>HikariCP</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.reflections</groupId>
+            <artifactId>reflections</artifactId>
+        </dependency>
+
+    </dependencies>
+
+</project>

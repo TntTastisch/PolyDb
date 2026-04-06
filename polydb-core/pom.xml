@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>de.tnttastisch</groupId>
+        <artifactId>polydb</artifactId>
+        <version>0.1.0-DEV</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>polydb-core</artifactId>
+    <name>PolyDB :: Core</name>
+    <description>
+        Zero-dependency API module: annotations, config classes,
+        lifecycle interfaces, shared exceptions and utilities.
+        This is the only module that framework consumers MUST depend on.
+    </description>
+</project>
