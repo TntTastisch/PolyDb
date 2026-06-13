@@ -26,7 +26,6 @@
 
     <modules>
         <module>polydb-core</module>
-        <module>polydb-migration</module>
         <module>polydb-examples</module>
     </modules>
 
@@ -70,31 +69,6 @@
             <dependency>
                 <groupId>${project.groupId}</groupId>
                 <artifactId>polydb-core</artifactId>
-                <version>${polydb.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>${project.groupId}</groupId>
-                <artifactId>polydb-schema</artifactId>
-                <version>${polydb.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>${project.groupId}</groupId>
-                <artifactId>polydb-dialect</artifactId>
-                <version>${polydb.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>${project.groupId}</groupId>
-                <artifactId>polydb-migration</artifactId>
-                <version>${polydb.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>${project.groupId}</groupId>
-                <artifactId>polydb-query</artifactId>
-                <version>${polydb.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>${project.groupId}</groupId>
-                <artifactId>polydb-boot</artifactId>
                 <version>${polydb.version}</version>
             </dependency>
 
@@ -251,8 +225,6 @@
     <build>
         <pluginManagement>
             <plugins>
-
-                <!-- Compiler: Java 21 + preview disabled, strict warnings -->
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-compiler-plugin</artifactId>
@@ -322,7 +294,7 @@
                                         <version>[3.9,)</version>
                                     </requireMavenVersion>
                                     <requireJavaVersion>
-                                        <version>[11,)</version>
+                                        <version>[17,)</version>
                                     </requireJavaVersion>
                                 </rules>
                             </configuration>
