@@ -2,9 +2,6 @@ package de.tnttastisch.polydb.dialect;
 
 import de.tnttastisch.polydb.schema.model.FieldModel;
 
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-
 public class FirebirdDialect extends AbstractSqlDialect {
 
     @Override
@@ -16,20 +13,29 @@ public class FirebirdDialect extends AbstractSqlDialect {
     public String getSqlType(FieldModel field) {
         String typeName = field.getType().getSimpleName();
         switch (typeName) {
-            case "String": return "VARCHAR(" + field.getLength() + ")";
+            case "String":
+                return "VARCHAR(" + field.getLength() + ")";
             case "int":
-            case "Integer": return "INTEGER";
+            case "Integer":
+                return "INTEGER";
             case "long":
-            case "Long": return "BIGINT";
+            case "Long":
+                return "BIGINT";
             case "boolean":
-            case "Boolean": return "BOOLEAN";
+            case "Boolean":
+                return "BOOLEAN";
             case "double":
-            case "Double": return "DOUBLE PRECISION";
+            case "Double":
+                return "DOUBLE PRECISION";
             case "float":
-            case "Float": return "FLOAT";
-            case "LocalDateTime": return "TIMESTAMP";
-            case "LocalDate": return "DATE";
-            default: return "BLOB SUB_TYPE 0";
+            case "Float":
+                return "FLOAT";
+            case "LocalDateTime":
+                return "TIMESTAMP";
+            case "LocalDate":
+                return "DATE";
+            default:
+                return "BLOB SUB_TYPE 0";
         }
     }
 

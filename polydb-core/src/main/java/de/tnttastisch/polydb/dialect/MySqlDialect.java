@@ -2,9 +2,6 @@ package de.tnttastisch.polydb.dialect;
 
 import de.tnttastisch.polydb.schema.model.FieldModel;
 
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-
 public class MySqlDialect extends AbstractSqlDialect {
 
     @Override
@@ -16,20 +13,29 @@ public class MySqlDialect extends AbstractSqlDialect {
     public String getSqlType(FieldModel field) {
         String typeName = field.getType().getSimpleName();
         switch (typeName) {
-            case "String": return "VARCHAR(" + field.getLength() + ")";
+            case "String":
+                return "VARCHAR(" + field.getLength() + ")";
             case "int":
-            case "Integer": return "INT";
+            case "Integer":
+                return "INT";
             case "long":
-            case "Long": return "BIGINT";
+            case "Long":
+                return "BIGINT";
             case "boolean":
-            case "Boolean": return "TINYINT(1)";
+            case "Boolean":
+                return "TINYINT(1)";
             case "double":
-            case "Double": return "DOUBLE";
+            case "Double":
+                return "DOUBLE";
             case "float":
-            case "Float": return "FLOAT";
-            case "LocalDateTime": return "DATETIME";
-            case "LocalDate": return "DATE";
-            default: return "VARCHAR(255)";
+            case "Float":
+                return "FLOAT";
+            case "LocalDateTime":
+                return "DATETIME";
+            case "LocalDate":
+                return "DATE";
+            default:
+                return "VARCHAR(255)";
         }
     }
 

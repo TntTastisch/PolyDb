@@ -1,6 +1,6 @@
 package de.tnttastisch.polydb.examples;
 
-import de.tnttastisch.polydb.boot.PolyDB;
+import de.tnttastisch.polydb.PolyDB;
 import de.tnttastisch.polydb.examples.entity.User;
 import de.tnttastisch.polydb.query.Repository;
 import org.slf4j.Logger;

@@ -26,7 +26,7 @@ public class DefaultResultMapper<T> implements ResultMapper<T> {
                 Field field = fieldModel.getField();
                 field.setAccessible(true);
                 Object value = rs.getObject(fieldModel.getColumnName());
-                
+
                 if (value != null) {
                     field.set(entity, value);
                 }

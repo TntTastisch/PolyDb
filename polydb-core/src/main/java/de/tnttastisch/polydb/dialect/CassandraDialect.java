@@ -3,10 +3,7 @@ package de.tnttastisch.polydb.dialect;
 import de.tnttastisch.polydb.schema.model.FieldModel;
 import de.tnttastisch.polydb.schema.model.IndexModel;
 
-import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.List;
-import java.util.UUID;
 
 public class CassandraDialect implements Dialect {
 
@@ -19,21 +16,31 @@ public class CassandraDialect implements Dialect {
     public String getSqlType(FieldModel field) {
         String typeName = field.getType().getSimpleName();
         switch (typeName) {
-            case "String": return "text";
+            case "String":
+                return "text";
             case "int":
-            case "Integer": return "int";
+            case "Integer":
+                return "int";
             case "long":
-            case "Long": return "bigint";
+            case "Long":
+                return "bigint";
             case "boolean":
-            case "Boolean": return "boolean";
+            case "Boolean":
+                return "boolean";
             case "double":
-            case "Double": return "double";
+            case "Double":
+                return "double";
             case "float":
-            case "Float": return "float";
-            case "LocalDateTime": return "timestamp";
-            case "LocalDate": return "date";
-            case "UUID": return "uuid";
-            default: return "blob";
+            case "Float":
+                return "float";
+            case "LocalDateTime":
+                return "timestamp";
+            case "LocalDate":
+                return "date";
+            case "UUID":
+                return "uuid";
+            default:
+                return "blob";
         }
     }
 

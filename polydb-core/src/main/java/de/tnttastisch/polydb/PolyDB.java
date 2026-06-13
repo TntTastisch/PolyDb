@@ -1,4 +1,4 @@
-package de.tnttastisch.polydb.boot;
+package de.tnttastisch.polydb;
 
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
@@ -159,18 +159,30 @@ public class PolyDB {
         String protocol = extractProtocol(url);
 
         switch (protocol) {
-            case "h2": return new H2Dialect();
-            case "mysql": return new MySqlDialect();
-            case "mariadb": return new MariaDbDialect();
-            case "postgresql": return new PostgreSqlDialect();
-            case "sqlite": return new SqliteDialect();
-            case "oracle": return new OracleDialect();
-            case "sqlserver": return new SqlServerDialect();
-            case "firebird": return new FirebirdDialect();
-            case "db2": return new Db2Dialect();
-            case "mongodb": return new MongoDialect();
-            case "cassandra": return new CassandraDialect();
-            default: throw new RuntimeException("Unsupported database dialect for URL: " + config.getUrl());
+            case "h2":
+                return new H2Dialect();
+            case "mysql":
+                return new MySqlDialect();
+            case "mariadb":
+                return new MariaDbDialect();
+            case "postgresql":
+                return new PostgreSqlDialect();
+            case "sqlite":
+                return new SqliteDialect();
+            case "oracle":
+                return new OracleDialect();
+            case "sqlserver":
+                return new SqlServerDialect();
+            case "firebird":
+                return new FirebirdDialect();
+            case "db2":
+                return new Db2Dialect();
+            case "mongodb":
+                return new MongoDialect();
+            case "cassandra":
+                return new CassandraDialect();
+            default:
+                throw new RuntimeException("Unsupported database dialect for URL: " + config.getUrl());
         }
     }
 

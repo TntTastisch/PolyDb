@@ -17,11 +17,11 @@
     <dependencies>
         <dependency>
             <groupId>${project.groupId}</groupId>
-            <artifactId>polydb-boot</artifactId>
+            <artifactId>polydb-core</artifactId>
         </dependency>
         <dependency>
             <groupId>${project.groupId}</groupId>
-            <artifactId>polydb-query</artifactId>
+            <artifactId>polydb-migration</artifactId>
         </dependency>
         <dependency>
             <groupId>com.h2database</groupId>

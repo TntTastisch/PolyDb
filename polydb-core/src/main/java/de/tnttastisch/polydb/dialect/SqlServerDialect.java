@@ -2,10 +2,6 @@ package de.tnttastisch.polydb.dialect;
 
 import de.tnttastisch.polydb.schema.model.FieldModel;
 
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.util.UUID;
-
 public class SqlServerDialect extends AbstractSqlDialect {
 
     @Override
@@ -17,21 +13,31 @@ public class SqlServerDialect extends AbstractSqlDialect {
     public String getSqlType(FieldModel field) {
         String typeName = field.getType().getSimpleName();
         switch (typeName) {
-            case "String": return "NVARCHAR(" + (field.getLength() > 4000 ? "MAX" : field.getLength()) + ")";
+            case "String":
+                return "NVARCHAR(" + (field.getLength() > 4000 ? "MAX" : field.getLength()) + ")";
             case "int":
-            case "Integer": return "INT";
+            case "Integer":
+                return "INT";
             case "long":
-            case "Long": return "BIGINT";
+            case "Long":
+                return "BIGINT";
             case "boolean":
-            case "Boolean": return "BIT";
+            case "Boolean":
+                return "BIT";
             case "double":
-            case "Double": return "FLOAT";
+            case "Double":
+                return "FLOAT";
             case "float":
-            case "Float": return "REAL";
-            case "LocalDateTime": return "DATETIME2";
-            case "LocalDate": return "DATE";
-            case "UUID": return "UNIQUEIDENTIFIER";
-            default: return "VARBINARY(MAX)";
+            case "Float":
+                return "REAL";
+            case "LocalDateTime":
+                return "DATETIME2";
+            case "LocalDate":
+                return "DATE";
+            case "UUID":
+                return "UNIQUEIDENTIFIER";
+            default:
+                return "VARBINARY(MAX)";
         }
     }
 

@@ -28,21 +28,6 @@
             <artifactId>polydb-core</artifactId>
         </dependency>
 
-        <!--
-            Dialect is needed so MigrationContext can expose the active
-            Dialect to Java-based Migration implementations.
-        -->
-        <dependency>
-            <groupId>de.tnttastisch</groupId>
-            <artifactId>polydb-dialect</artifactId>
-        </dependency>
-
-        <!--
-            HikariCP: the migration executor obtains connections from the
-            pool already configured in polydb-boot. Declared here so
-            MigrationContext can accept a DataSource parameter.
-            Scope compile – the pool is always present at runtime.
-        -->
         <dependency>
             <groupId>com.zaxxer</groupId>
             <artifactId>HikariCP</artifactId>

@@ -1,7 +1,9 @@
 # PolyDb
 
-PolyDb is a lightweight Java persistence framework for working with databases using annotations, automatic schema generation, repository-based queries, and migrations. 
-It is designed to keep the setup simple while still providing a structured and extensible way to map Java entities to database tables.
+PolyDb is a lightweight Java persistence framework for working with databases using annotations, automatic schema
+generation, repository-based queries, and migrations.
+It is designed to keep the setup simple while still providing a structured and extensible way to map Java entities to
+database tables.
 ---
 
 ## Features
@@ -48,6 +50,7 @@ PolyDb is split into several modules:
 ## Quick Start
 
 ### 1. Add an entity
+
 ```java
 package de.tnttastisch.polydb.examples.entity;
 
@@ -117,9 +120,11 @@ public class User {
     }
 }
 ```
+
 ---
 
 ### 2. Start PolyDb
+
 ```java
 PolyDB polyDB = PolyDB.builder()
 .url("jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1")
@@ -129,9 +134,11 @@ PolyDB polyDB = PolyDB.builder()
 .autoMigration(true)
 .start();
 ```
+
 ---
 
 ### 3. Use a repository
+
 ```java
 Repository<User> userRepository = polyDB.repository(User.class);
 
@@ -149,6 +156,7 @@ for (User u : users) {
 System.out.println("Found user: " + u.getUsername() + " (" + u.getEmail() + ")");
 }
 ```
+
 ---
 
 ## Example Application
@@ -167,21 +175,27 @@ This is a good starting point if you want to understand the framework structure 
 ## Entity Annotations
 
 ### `@Entity`
+
 Marks a class as a database entity.
 
 ### `@Table`
+
 Defines the table name.
 
 ### `@Id`
+
 Marks the primary key field.
 
 ### `@Column`
+
 Defines column metadata such as name, length, nullability, precision, and scale.
 
 ### `@Unique`
+
 Marks a column as unique.
 
 ### `@Index`
+
 Defines an index on a class or field.
 
 ---
@@ -189,6 +203,7 @@ Defines an index on a class or field.
 ## Repository API
 
 PolyDb provides a simple repository abstraction:
+
 ```java
 public interface Repository<T> {
 void save(T entity);
@@ -200,10 +215,12 @@ void deleteById(Object id);
 ```
 
 ### Example
+
 ```java
 Optional<User> user = userRepository.findById(id);
 userRepository.deleteById(id);
 ```
+
 ---
 
 ## Migrations
@@ -211,6 +228,7 @@ userRepository.deleteById(id);
 PolyDb supports Java-based migrations.
 
 Example migration:
+
 ```java
 package de.tnttastisch.polydb.examples.entity.migrations;
 
@@ -241,6 +259,7 @@ public class V1_InitialDataMigration implements Migration {
     }
 }
 ```
+
 Migrations are scanned automatically from the `.migrations` package inside your entity package.
 
 ---
@@ -266,13 +285,17 @@ PolyDb includes dialect support for:
 ## Build
 
 To build the whole project:
+
 ```bash
 mvn clean install
 ```
+
 To run the example module:
+
 ```bash
 mvn -pl polydb-examples -am exec:java
 ```
+
 ---
 
 ## Example Use Case
@@ -300,6 +323,7 @@ A typical PolyDb setup looks like this:
 Contributions, issues, and suggestions are welcome.
 
 If you add new features, please include:
+
 - tests
 - documentation
 - example usage where appropriate
