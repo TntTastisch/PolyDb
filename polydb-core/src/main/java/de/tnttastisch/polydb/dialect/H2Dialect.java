@@ -12,33 +12,19 @@ public class H2Dialect extends AbstractSqlDialect {
     @Override
     public String getSqlType(FieldModel field) {
         String typeName = field.getType().getSimpleName();
-        switch (typeName) {
-            case "String":
-                return "VARCHAR(" + field.getLength() + ")";
-            case "int":
-            case "Integer":
-                return "INT";
-            case "long":
-            case "Long":
-                return "BIGINT";
-            case "boolean":
-            case "Boolean":
-                return "BOOLEAN";
-            case "double":
-            case "Double":
-                return "DOUBLE";
-            case "float":
-            case "Float":
-                return "FLOAT";
-            case "LocalDateTime":
-                return "TIMESTAMP";
-            case "LocalDate":
-                return "DATE";
-            case "UUID":
-                return "UUID";
-            default:
-                return "VARCHAR(255)";
-        }
+        return switch (typeName) {
+            case "String" -> "VARCHAR(" + field.getLength() + ")";
+            case "int", "Integer" -> "INT";
+            case "long", "Long" -> "BIGINT";
+            case "boolean", "Boolean" -> "BOOLEAN";
+            case "double", "Double" -> "DOUBLE";
+            case "float", "Float" -> "FLOAT";
+            case "LocalDateTime", "Timestamp" -> "TIMESTAMP";
+            case "LocalDate" -> "DATE";
+            case "UUID" -> "UUID";
+            case "OffsetDateTime" -> "TIMESTAMP WITH TIME ZONE";
+            default -> "VARCHAR(255)";
+        };
     }
 
     @Override

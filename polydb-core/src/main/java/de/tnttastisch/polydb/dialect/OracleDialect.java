@@ -12,33 +12,19 @@ public class OracleDialect extends AbstractSqlDialect {
     @Override
     public String getSqlType(FieldModel field) {
         String typeName = field.getType().getSimpleName();
-        switch (typeName) {
-            case "String":
-                return "VARCHAR2(" + field.getLength() + ")";
-            case "int":
-            case "Integer":
-                return "NUMBER(10)";
-            case "long":
-            case "Long":
-                return "NUMBER(19)";
-            case "boolean":
-            case "Boolean":
-                return "NUMBER(1)";
-            case "double":
-            case "Double":
-                return "FLOAT(126)";
-            case "float":
-            case "Float":
-                return "FLOAT(63)";
-            case "LocalDateTime":
-                return "TIMESTAMP";
-            case "LocalDate":
-                return "DATE";
-            case "UUID":
-                return "RAW(16)";
-            default:
-                return "BLOB";
-        }
+        return switch (typeName) {
+            case "String" -> "VARCHAR2(" + field.getLength() + ")";
+            case "int", "Integer" -> "NUMBER(10)";
+            case "long", "Long" -> "NUMBER(19)";
+            case "boolean", "Boolean" -> "NUMBER(1)";
+            case "double", "Double" -> "FLOAT(126)";
+            case "float", "Float" -> "FLOAT(63)";
+            case "LocalDateTime", "Timestamp" -> "TIMESTAMP";
+            case "LocalDate" -> "DATE";
+            case "UUID" -> "RAW(16)";
+            case "OffsetDateTime" -> "TIMESTAMP WITH TIME ZONE";
+            default -> "BLOB";
+        };
     }
 
     @Override

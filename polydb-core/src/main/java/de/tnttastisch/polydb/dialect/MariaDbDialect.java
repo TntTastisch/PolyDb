@@ -12,11 +12,9 @@ public class MariaDbDialect extends MySqlDialect {
     @Override
     public String getSqlType(FieldModel field) {
         String typeName = field.getType().getSimpleName();
-        switch (typeName) {
-            case "UUID":
-                return "UUID";
-            default:
-                return super.getSqlType(field);
-        }
+        return switch (typeName) {
+            case "UUID" -> "UUID";
+            default -> super.getSqlType(field);
+        };
     }
 }

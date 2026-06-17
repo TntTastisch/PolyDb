@@ -12,30 +12,12 @@ public class SqliteDialect extends AbstractSqlDialect {
     @Override
     public String getSqlType(FieldModel field) {
         String typeName = field.getType().getSimpleName();
-        switch (typeName) {
-            case "String":
-                return "TEXT";
-            case "int":
-            case "Integer":
-            case "long":
-            case "Long":
-                return "INTEGER";
-            case "boolean":
-            case "Boolean":
-                return "INTEGER";
-            case "double":
-            case "Double":
-            case "float":
-            case "Float":
-                return "REAL";
-            case "LocalDateTime":
-            case "LocalDate":
-                return "TEXT";
-            case "UUID":
-                return "TEXT";
-            default:
-                return "BLOB";
-        }
+        return switch (typeName) {
+            case "String", "UUID", "OffsetDateTime", "LocalDateTime", "Timestamp", "LocalDate" -> "TEXT";
+            case "int", "Integer", "long", "Long", "boolean", "Boolean" -> "INTEGER";
+            case "double", "Double", "float", "Float" -> "REAL";
+            default -> "BLOB";
+        };
     }
 
     @Override

@@ -8,7 +8,7 @@
     <parent>
         <groupId>de.tnttastisch</groupId>
         <artifactId>polydb</artifactId>
-        <version>0.1.0-DEV</version>
+        <version>0.1.1-DEV</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
 
@@ -70,11 +70,27 @@
 
     <build>
         <plugins>
-            <!--
-                Integration tests (IT suffix) run with maven-failsafe.
-                They boot a real in-memory H2 database to verify the full
-                startup pipeline end-to-end.
-            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.6.1</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <artifactSet>
+                        <includes>
+                            <include>org.reflections:reflections</include>
+                        </includes>
+                    </artifactSet>
+                </configuration>
+            </plugin>
+
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-failsafe-plugin</artifactId>

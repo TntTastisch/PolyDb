@@ -15,31 +15,16 @@ public class MongoDialect implements Dialect {
     @Override
     public String getSqlType(FieldModel field) {
         String typeName = field.getType().getSimpleName();
-        switch (typeName) {
-            case "String":
-                return "string";
-            case "int":
-            case "Integer":
-                return "int";
-            case "long":
-            case "Long":
-                return "long";
-            case "boolean":
-            case "Boolean":
-                return "bool";
-            case "double":
-            case "Double":
-            case "float":
-            case "Float":
-                return "double";
-            case "LocalDateTime":
-            case "LocalDate":
-                return "date";
-            case "UUID":
-                return "uuid";
-            default:
-                return "binData";
-        }
+        return switch (typeName) {
+            case "String", "OffsetDateTime", "Timestamp" -> "string";
+            case "int", "Integer" -> "int";
+            case "long", "Long" -> "long";
+            case "boolean", "Boolean" -> "bool";
+            case "double", "Double", "float", "Float" -> "double";
+            case "LocalDateTime", "LocalDate" -> "date";
+            case "UUID" -> "uuid";
+            default -> "binData";
+        };
     }
 
     @Override

@@ -12,31 +12,18 @@ public class FirebirdDialect extends AbstractSqlDialect {
     @Override
     public String getSqlType(FieldModel field) {
         String typeName = field.getType().getSimpleName();
-        switch (typeName) {
-            case "String":
-                return "VARCHAR(" + field.getLength() + ")";
-            case "int":
-            case "Integer":
-                return "INTEGER";
-            case "long":
-            case "Long":
-                return "BIGINT";
-            case "boolean":
-            case "Boolean":
-                return "BOOLEAN";
-            case "double":
-            case "Double":
-                return "DOUBLE PRECISION";
-            case "float":
-            case "Float":
-                return "FLOAT";
-            case "LocalDateTime":
-                return "TIMESTAMP";
-            case "LocalDate":
-                return "DATE";
-            default:
-                return "BLOB SUB_TYPE 0";
-        }
+        return switch (typeName) {
+            case "String" -> "VARCHAR(" + field.getLength() + ")";
+            case "int", "Integer" -> "INTEGER";
+            case "long", "Long" -> "BIGINT";
+            case "boolean", "Boolean" -> "BOOLEAN";
+            case "double", "Double" -> "DOUBLE PRECISION";
+            case "float", "Float" -> "FLOAT";
+            case "LocalDateTime", "Timestamp" -> "TIMESTAMP";
+            case "LocalDate" -> "DATE";
+            case "OffsetDateTime" -> "TIMESTAMP WITH TIME ZONE";
+            default -> "BLOB SUB_TYPE 0";
+        };
     }
 
     @Override

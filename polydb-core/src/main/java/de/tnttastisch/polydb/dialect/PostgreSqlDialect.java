@@ -12,33 +12,19 @@ public class PostgreSqlDialect extends AbstractSqlDialect {
     @Override
     public String getSqlType(FieldModel field) {
         String typeName = field.getType().getSimpleName();
-        switch (typeName) {
-            case "String":
-                return "VARCHAR(" + field.getLength() + ")";
-            case "int":
-            case "Integer":
-                return field.isAutoIncrement() ? "SERIAL" : "INTEGER";
-            case "long":
-            case "Long":
-                return field.isAutoIncrement() ? "BIGSERIAL" : "BIGINT";
-            case "boolean":
-            case "Boolean":
-                return "BOOLEAN";
-            case "double":
-            case "Double":
-                return "DOUBLE PRECISION";
-            case "float":
-            case "Float":
-                return "REAL";
-            case "LocalDateTime":
-                return "TIMESTAMP";
-            case "LocalDate":
-                return "DATE";
-            case "UUID":
-                return "UUID";
-            default:
-                return "TEXT";
-        }
+        return switch (typeName) {
+            case "String" -> "VARCHAR(" + field.getLength() + ")";
+            case "int", "Integer" -> field.isAutoIncrement() ? "SERIAL" : "INTEGER";
+            case "long", "Long" -> field.isAutoIncrement() ? "BIGSERIAL" : "BIGINT";
+            case "boolean", "Boolean" -> "BOOLEAN";
+            case "double", "Double" -> "DOUBLE PRECISION";
+            case "float", "Float" -> "REAL";
+            case "LocalDateTime", "Timestamp" -> "TIMESTAMP";
+            case "LocalDate" -> "DATE";
+            case "OffsetDateTime" -> "TIMESTAMPTZ";
+            case "UUID" -> "UUID";
+            default -> "TEXT";
+        };
     }
 
     @Override

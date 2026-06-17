@@ -4,6 +4,7 @@ PolyDb is a lightweight Java persistence framework for working with databases us
 generation, repository-based queries, and migrations.
 It is designed to keep the setup simple while still providing a structured and extensible way to map Java entities to
 database tables.
+
 ---
 
 ## Features
@@ -18,29 +19,9 @@ database tables.
 
 ---
 
-## Modules
-
-PolyDb is split into several modules:
-
-- **polydb-core** Core annotations, configuration classes, and shared exceptions
-
-- **polydb-boot** Framework entry point and startup orchestration
-
-- **polydb-schema** Entity parsing, schema models, schema comparison, and schema reading
-
-- **polydb-dialect** Database-specific SQL generation and type mapping
-
-- **polydb-query** Repository implementation and query execution
-
-- **polydb-migration** Migration scanning, execution, and history tracking
-
-- **polydb-examples** Example application showing how to use PolyDb
-
----
-
 ## Requirements
 
-- Java 11
+- Java 17
 - Maven
 - A supported database
 - A JDBC driver for your database
@@ -56,7 +37,7 @@ package de.tnttastisch.polydb.examples.entity;
 
 import de.tnttastisch.polydb.core.annotations.*;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 @Entity
@@ -75,7 +56,7 @@ public class User {
     private String email;
 
     @Column(name = "created_at")
-    private LocalDateTime createdAt;
+    private OffsetDateTime createdAt;
 
     public User() {
     }
@@ -313,8 +294,25 @@ A typical PolyDb setup looks like this:
 ## Project Links
 
 - Repository: [https://repo.tnttastisch.de](https://repo.tnttastisch.de)
-- Example module: `polydb-examples`
+- Example module: `polydb-core`
 - Main entry point: `PolyDB.builder()`
+
+
+### Use in Maven
+```xml
+<repository>
+  <id>tnttastisch-repo-releases</id>
+  <name>TntTastisch Repository</name>
+  <url>https://repo.tnttastisch.de/releases</url>
+</repository>
+
+
+<dependency>
+<groupId>de.tnttastisch</groupId>
+<artifactId>polydb-core</artifactId>
+<version>${current_version}</version>
+</dependency>
+```
 
 ---
 

@@ -12,33 +12,19 @@ public class SqlServerDialect extends AbstractSqlDialect {
     @Override
     public String getSqlType(FieldModel field) {
         String typeName = field.getType().getSimpleName();
-        switch (typeName) {
-            case "String":
-                return "NVARCHAR(" + (field.getLength() > 4000 ? "MAX" : field.getLength()) + ")";
-            case "int":
-            case "Integer":
-                return "INT";
-            case "long":
-            case "Long":
-                return "BIGINT";
-            case "boolean":
-            case "Boolean":
-                return "BIT";
-            case "double":
-            case "Double":
-                return "FLOAT";
-            case "float":
-            case "Float":
-                return "REAL";
-            case "LocalDateTime":
-                return "DATETIME2";
-            case "LocalDate":
-                return "DATE";
-            case "UUID":
-                return "UNIQUEIDENTIFIER";
-            default:
-                return "VARBINARY(MAX)";
-        }
+        return switch (typeName) {
+            case "String" -> "NVARCHAR(" + (field.getLength() > 4000 ? "MAX" : field.getLength()) + ")";
+            case "int", "Integer" -> "INT";
+            case "long", "Long" -> "BIGINT";
+            case "boolean", "Boolean" -> "BIT";
+            case "double", "Double" -> "FLOAT";
+            case "float", "Float" -> "REAL";
+            case "LocalDateTime", "Timestamp" -> "DATETIME2";
+            case "LocalDate" -> "DATE";
+            case "OffsetDateTime" -> "DATETIMEOFFSET";
+            case "UUID" -> "UNIQUEIDENTIFIER";
+            default -> "VARBINARY(MAX)";
+        };
     }
 
     @Override

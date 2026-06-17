@@ -15,33 +15,18 @@ public class CassandraDialect implements Dialect {
     @Override
     public String getSqlType(FieldModel field) {
         String typeName = field.getType().getSimpleName();
-        switch (typeName) {
-            case "String":
-                return "text";
-            case "int":
-            case "Integer":
-                return "int";
-            case "long":
-            case "Long":
-                return "bigint";
-            case "boolean":
-            case "Boolean":
-                return "boolean";
-            case "double":
-            case "Double":
-                return "double";
-            case "float":
-            case "Float":
-                return "float";
-            case "LocalDateTime":
-                return "timestamp";
-            case "LocalDate":
-                return "date";
-            case "UUID":
-                return "uuid";
-            default:
-                return "blob";
-        }
+        return switch (typeName) {
+            case "String" -> "text";
+            case "int", "Integer" -> "int";
+            case "long", "Long" -> "bigint";
+            case "boolean", "Boolean" -> "boolean";
+            case "double", "Double" -> "double";
+            case "float", "Float" -> "float";
+            case "Timestamp", "LocalDateTime", "OffsetDateTime" -> "TIMESTAMP";
+            case "LocalDate" -> "date";
+            case "UUID" -> "uuid";
+            default -> "blob";
+        };
     }
 
     @Override

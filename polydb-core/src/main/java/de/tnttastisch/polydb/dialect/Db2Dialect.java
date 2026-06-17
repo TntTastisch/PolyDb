@@ -12,31 +12,18 @@ public class Db2Dialect extends AbstractSqlDialect {
     @Override
     public String getSqlType(FieldModel field) {
         String typeName = field.getType().getSimpleName();
-        switch (typeName) {
-            case "String":
-                return "VARCHAR(" + field.getLength() + ")";
-            case "int":
-            case "Integer":
-                return "INTEGER";
-            case "long":
-            case "Long":
-                return "BIGINT";
-            case "boolean":
-            case "Boolean":
-                return "SMALLINT";
-            case "double":
-            case "Double":
-                return "DOUBLE";
-            case "float":
-            case "Float":
-                return "REAL";
-            case "LocalDateTime":
-                return "TIMESTAMP";
-            case "LocalDate":
-                return "DATE";
-            default:
-                return "BLOB";
-        }
+        return switch (typeName) {
+            case "String" -> "VARCHAR(" + field.getLength() + ")";
+            case "int", "Integer" -> "INTEGER";
+            case "long", "Long" -> "BIGINT";
+            case "boolean", "Boolean" -> "SMALLINT";
+            case "double", "Double" -> "DOUBLE";
+            case "float", "Float" -> "REAL";
+            case "OffsetDateTime" -> "TIMESTAMP WITH TIME ZONE";
+            case "LocalDateTime", "Timestamp" -> "TIMESTAMP";
+            case "LocalDate" -> "DATE";
+            default -> "BLOB";
+        };
     }
 
     @Override

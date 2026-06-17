@@ -10,7 +10,7 @@
     <!-- ================================================================== -->
     <groupId>de.tnttastisch</groupId>
     <artifactId>polydb</artifactId>
-    <version>0.1.0-DEV</version>
+    <version>0.1.1-DEV</version>
     <packaging>pom</packaging>
 
     <name>PolyDB :: Parent</name>
