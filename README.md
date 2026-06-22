@@ -106,14 +106,21 @@ public class User {
 
 ### 2. Start PolyDb
 
+`PolyDB` implements `AutoCloseable`, so use try-with-resources to release the connection pool
+automatically:
+
 ```java
-PolyDB polyDB = PolyDB.builder()
-.url("jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1")
-.username("sa")
-.password("")
-.entityPackage("de.tnttastisch.polydb.examples.entity")
-.autoMigration(true)
-.start();
+try (PolyDB polyDB = PolyDB.builder()
+        .url("jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1")
+        .username("sa")
+        .password("")
+        .entityPackage("de.tnttastisch.polydb.examples.entity")
+        .autoMigration(true)
+        .start()) {
+
+    Repository<User> userRepository = polyDB.repository(User.class);
+    // ... use repositories here ...
+} // close() is invoked automatically
 ```
 
 ---
@@ -134,7 +141,7 @@ userRepository.save(user);
 List<User> users = userRepository.findAll();
 
 for (User u : users) {
-System.out.println("Found user: " + u.getUsername() + " (" + u.getEmail() + ")");
+    System.out.println("Found user: " + u.getUsername() + " (" + u.getEmail() + ")");
 }
 ```
 
@@ -178,6 +185,78 @@ Marks a column as unique.
 ### `@Index`
 
 Defines an index on a class or field.
+
+### `@Transient`
+
+Marks a field as non-persistent. The field becomes neither a column nor a relation (equivalent to
+the Java `transient` keyword). `static` and synthetic fields are skipped as well.
+
+---
+
+## Relations
+
+PolyDb maps associations between entities and realises them as foreign keys on the SQL dialects.
+
+### Annotations
+
+| Annotation | Side | Effect |
+|------------|------|--------|
+| `@ManyToOne` | owning | Adds a foreign-key column on this table. Default fetch `EAGER`. |
+| `@OneToOne` | owning (`mappedBy` empty) / inverse | Owning side adds a foreign-key column. Default fetch `EAGER`. |
+| `@OneToMany(mappedBy = "...")` | inverse | No column on this table; the foreign key lives on the target. Default fetch `LAZY`. |
+| `@ManyToMany` | owning (`@JoinTable`) / inverse (`mappedBy`) | Realised through a join table. Default fetch `LAZY`. |
+| `@JoinColumn` | — | Customises the foreign-key column (`name`, `referencedColumnName`, `nullable`). Defaults to `<field>_id`. |
+| `@JoinTable` | — | Declares the join table for the owning side of a `@ManyToMany`. |
+
+Fetch types live in `FetchType { LAZY, EAGER }` and cascading in
+`CascadeType { PERSIST, MERGE, REMOVE, ALL }`.
+
+### Example
+
+```java
+@Entity
+@Table(name = "posts")
+public class Post {
+
+    @Id @Column(name = "id")
+    private UUID id;
+
+    @Column(name = "title")
+    private String title;
+
+    @ManyToOne(optional = false)
+    @JoinColumn(name = "author_id", nullable = false)
+    private User author;            // owning side -> author_id column + foreign key
+}
+
+@Entity
+@Table(name = "users")
+public class User {
+
+    @Id @Column(name = "id")
+    private UUID id;
+
+    @OneToMany(mappedBy = "author", cascade = CascadeType.PERSIST)
+    private List<Post> posts = new ArrayList<>();   // inverse side, no column
+}
+```
+
+The foreign-key column type matches the target entity's `@Id` type (e.g. `UUID`, `BIGINT`), resolved
+per dialect. Owning `@ManyToOne(optional = false)` / `@JoinColumn(nullable = false)` produce a
+`NOT NULL` foreign-key column.
+
+### Behaviour
+
+- **Writing** &mdash; for an owning relation the foreign key is written from the associated entity's
+  id. `Cascade.PERSIST`/`ALL` saves the associated entity (and `@OneToMany` children) automatically;
+  `Cascade.REMOVE` deletes children when the parent is deleted.
+- **Reading** &mdash; `EAGER` relations are resolved one level deep when the owning entity is read.
+  `LAZY` relations are **not** auto-populated yet (no runtime proxies); they are reserved for a future
+  deferred-loading implementation.
+- **Schema** &mdash; referenced tables are created before referencing tables (topological ordering).
+  Cyclic dependencies (mutually referencing tables) are broken by adding the closing foreign key via
+  `ALTER TABLE ... ADD CONSTRAINT` after both tables exist. On existing tables, a missing foreign key
+  is added via `ALTER TABLE` as well.
 
 ---
 
@@ -260,6 +339,47 @@ PolyDb includes dialect support for:
 - DB2
 - MongoDB
 - Cassandra
+
+### Foreign keys per dialect
+
+- **H2, PostgreSQL, Oracle, SQL Server, Firebird, DB2** &mdash; standard named constraints, inline at
+  `CREATE TABLE` and via `ALTER TABLE ... ADD CONSTRAINT`.
+- **MySQL / MariaDB** &mdash; foreign keys require the InnoDB engine, so generated tables append
+  `ENGINE=InnoDB`.
+- **SQLite** &mdash; foreign keys can only be declared **inline** at table creation; SQLite cannot add
+  them via `ALTER TABLE` (such changes are skipped with a warning). Enforcement is off by default, so
+  PolyDb runs `PRAGMA foreign_keys = ON` on every pooled connection. Consequently, **cyclic** foreign
+  keys (which require a deferred `ALTER`) are not supported on SQLite.
+- **MongoDB / Cassandra** &mdash; these stores have no enforced foreign keys (the relation methods are
+  no-ops). NoSQL repositories are not implemented yet; relations there are a **design/future** concern:
+  in **MongoDB** model them by *embedding* nested documents or *referencing* a foreign `_id` (resolved
+  with a second query or `$lookup`); in **Cassandra** by *denormalisation*, UDTs or collection columns
+  (query-first). Referential integrity is not enforced in either case.
+
+---
+
+## Lifecycle
+
+`PolyDB` implements `AutoCloseable`. Use try-with-resources, or call `close()` / `shutdown()`
+explicitly.
+
+```java
+try (PolyDB polyDB = PolyDB.builder() /* ... */ .start()) {
+    // ...
+}
+
+// or manually
+PolyDB polyDB = PolyDB.builder() /* ... */ .start();
+try {
+    // ...
+} finally {
+    polyDB.shutdown();   // alias for close()
+}
+```
+
+- `close()` and `shutdown()` close the connection pool (and any future native NoSQL client).
+- `close()` is **idempotent**: calling it more than once is a no-op.
+- After closing, `repository(...)` throws `IllegalStateException("PolyDB has been closed")`.
 
 ---
 
