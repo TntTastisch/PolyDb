@@ -3,6 +3,7 @@ package de.tnttastisch.polydb;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import de.tnttastisch.polydb.core.config.PolyDBConfig;
+import de.tnttastisch.polydb.core.exception.PolyDBException;
 import de.tnttastisch.polydb.dialect.*;
 import de.tnttastisch.polydb.migration.core.MigrationContext;
 import de.tnttastisch.polydb.migration.core.MigrationRunner;
@@ -23,18 +24,27 @@ import java.sql.Connection;
 import java.sql.Statement;
 import java.util.List;
 
-public class PolyDB {
+public class PolyDB implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(PolyDB.class);
 
     private final PolyDBConfig config;
-    private final DataSource dataSource;
     private final Dialect dialect;
+    private final DataSource dataSource;
+
+    /**
+     * Optional handle to a non-JDBC native client (e.g. a future {@code MongoClient} or
+     * {@code CqlSession}). Such clients are not {@link DataSource}s, so they are tracked separately
+     * and closed in {@link #close()} when present.
+     */
+    private AutoCloseable nativeClient;
+
+    private volatile boolean closed;
 
     private PolyDB(PolyDBConfig config) {
         this.config = config;
-        this.dataSource = createDataSource(config);
         this.dialect = detectDialect(config);
+        this.dataSource = createDataSource(config, dialect);
     }
 
     public static PolyDB start(PolyDBConfig config) {
@@ -43,12 +53,72 @@ public class PolyDB {
         return polyDB;
     }
 
+    /**
+     * Closes the underlying connection pool (and any registered native client). Idempotent: calling
+     * it more than once is a no-op.
+     */
+    @Override
+    public void close() {
+        if (closed) {
+            return;
+        }
+        closed = true;
+
+        try {
+            closeDataSource();
+        } finally {
+            closeNativeClient();
+        }
+    }
+
+    /**
+     * Alias for {@link #close()}; {@code close()} remains the idiomatic name and enables
+     * try-with-resources.
+     */
+    public void shutdown() {
+        close();
+    }
+
+    public boolean isClosed() {
+        return closed;
+    }
+
+    private void closeDataSource() {
+        if (dataSource instanceof HikariDataSource hikari) {
+            hikari.close();
+        } else if (dataSource instanceof AutoCloseable closeable) {
+            try {
+                closeable.close();
+            } catch (Exception e) {
+                throw new PolyDBException("Failed to close datasource", e);
+            }
+        }
+    }
+
+    private void closeNativeClient() {
+        if (nativeClient != null) {
+            try {
+                nativeClient.close();
+            } catch (Exception e) {
+                throw new PolyDBException("Failed to close native client", e);
+            }
+        }
+    }
+
+    /**
+     * Registers a native (non-JDBC) client to be closed alongside this instance. Reserved for the
+     * NoSQL implementations.
+     */
+    protected void registerNativeClient(AutoCloseable nativeClient) {
+        this.nativeClient = nativeClient;
+    }
+
     public static Builder builder() {
         return new Builder();
     }
 
     public static class Builder {
-        private PolyDBConfig.Builder configBuilder = PolyDBConfig.builder();
+        private final PolyDBConfig.Builder configBuilder = PolyDBConfig.builder();
 
         public Builder url(String url) {
             configBuilder.url(url);
@@ -122,7 +192,7 @@ public class PolyDB {
             }
         } catch (Exception e) {
             log.error("Failed to sync schema", e);
-            throw new RuntimeException(e);
+            throw new PolyDBException("Failed to sync schema", e);
         }
 
         runMigrations();
@@ -136,7 +206,7 @@ public class PolyDB {
         log.info("PolyDB is ready");
     }
 
-    private DataSource createDataSource(PolyDBConfig config) {
+    private DataSource createDataSource(PolyDBConfig config, Dialect dialect) {
         String url = config.getUrl().toLowerCase();
         if (url.startsWith("mongodb://") || url.startsWith("cassandra://") || url.contains(":cassandra:")) {
             return null;
@@ -149,6 +219,13 @@ public class PolyDB {
 
         if (config.getDriverClassName() != null) {
             hikariConfig.setDriverClassName(config.getDriverClassName());
+        }
+
+        // Per-connection setup such as SQLite's "PRAGMA foreign_keys = ON" so foreign-key
+        // enforcement is active on every pooled connection.
+        String connectionInit = dialect.getEnableForeignKeysStatement();
+        if (connectionInit != null) {
+            hikariConfig.setConnectionInitSql(connectionInit);
         }
 
         return new HikariDataSource(hikariConfig);
@@ -182,7 +259,7 @@ public class PolyDB {
             case "cassandra":
                 return new CassandraDialect();
             default:
-                throw new RuntimeException("Unsupported database dialect for URL: " + config.getUrl());
+                throw new PolyDBException("Unsupported database dialect for URL: " + config.getUrl());
         }
     }
 
@@ -201,10 +278,17 @@ public class PolyDB {
     }
 
     public <T> Repository<T> repository(Class<T> entityClass) {
+        ensureOpen();
         if (dataSource != null) {
             return new JdbcRepository<>(entityClass, dataSource, dialect);
         }
         throw new UnsupportedOperationException("NoSQL repositories not yet implemented");
+    }
+
+    private void ensureOpen() {
+        if (closed) {
+            throw new IllegalStateException("PolyDB has been closed");
+        }
     }
 
     public DataSource getDataSource() {
