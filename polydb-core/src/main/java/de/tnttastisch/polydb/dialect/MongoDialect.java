@@ -10,6 +10,12 @@ import java.util.List;
  * MongoDB has no notion of SQL joins or enforced foreign keys. Relations are a modelling concern:
  * use <em>embedding</em> (nested documents) or <em>referencing</em> (store the foreign {@code _id}
  * and resolve via a second query or {@code $lookup}); referential integrity is not enforced.
+ *
+ * <p>MongoDB is schemaless, so most DDL has no equivalent: this dialect implements {@link Dialect}
+ * directly and emits mongo-shell ({@code db.<collection>.…}) commands. Per-column operations
+ * ({@code ADD}/{@code MODIFY}/{@code DROP COLUMN}) and all foreign-key methods are no-ops, while
+ * {@link #getSqlType(FieldModel)} returns BSON type names ({@code string}, {@code int},
+ * {@code binData}, …) for use with schema-validation rules. Identifiers are single-quoted.
  */
 public class MongoDialect implements Dialect {
 
@@ -39,6 +45,7 @@ public class MongoDialect implements Dialect {
         return "db.createCollection('" + tableName + "')";
     }
 
+    // Documents are schemaless: there is no column to add, alter or drop, so these are no-ops.
     @Override
     public String getAddColumnSql(String tableName, FieldModel field) {
         return null;

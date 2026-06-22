@@ -8,8 +8,17 @@ import de.tnttastisch.polydb.schema.model.RelationModel;
 import java.util.Collections;
 import java.util.List;
 
+/**
+ * A single dialect-independent migration step computed by the
+ * {@link SchemaComparator} from the difference between the desired entity models and the live
+ * database. Each concrete subclass is one kind of step (create table, add/modify column, create
+ * index, add foreign key); the {@link de.tnttastisch.polydb.schema.generator.SchemaGenerator} later
+ * renders each into dialect-specific DDL. Modelling changes as data (rather than raw SQL) lets the
+ * comparator order them — e.g. defer cycle-closing foreign keys — before any SQL is produced.
+ */
 public abstract class SchemaChange {
 
+    /** Create a new table for an entity, optionally with some foreign keys declared inline. */
     public static class CreateTable extends SchemaChange {
         private final EntityModel entity;
         private final List<RelationModel> inlineForeignKeys;
@@ -36,6 +45,7 @@ public abstract class SchemaChange {
         }
     }
 
+    /** Add a column that exists on the entity but is missing from an existing table. */
     public static class AddColumn extends SchemaChange {
         private final String tableName;
         private final FieldModel field;
@@ -54,6 +64,7 @@ public abstract class SchemaChange {
         }
     }
 
+    /** Alter an existing column to match the entity's definition. */
     public static class ModifyColumn extends SchemaChange {
         private final String tableName;
         private final FieldModel field;
@@ -72,6 +83,7 @@ public abstract class SchemaChange {
         }
     }
 
+    /** Create an index declared via {@code @Index} on the entity. */
     public static class CreateIndex extends SchemaChange {
         private final String tableName;
         private final IndexModel index;

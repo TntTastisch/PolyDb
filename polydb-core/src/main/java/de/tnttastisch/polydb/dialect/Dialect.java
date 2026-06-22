@@ -6,10 +6,22 @@ import de.tnttastisch.polydb.schema.model.RelationModel;
 
 import java.util.List;
 
+/**
+ * Database-specific strategy that translates PolyDB's abstract schema model into the concrete DDL
+ * (or, for NoSQL stores, the equivalent commands) of a single backend.
+ *
+ * <p>SQL backends typically extend {@link AbstractSqlDialect}, which supplies standards-based
+ * defaults and lets a concrete dialect override only what its vendor does differently — type
+ * mappings, identifier quoting, auto-increment/identity syntax, the {@code MODIFY COLUMN} form,
+ * and so on. NoSQL backends (e.g. {@link MongoDialect}, {@link CassandraDialect}) implement this
+ * interface directly and leave the foreign-key methods as no-ops.
+ */
 public interface Dialect {
 
+    /** Human-readable name of the target database, e.g. {@code "PostgreSQL"}. */
     String getName();
 
+    /** Maps a field's Java type to the backend's column type, honouring length and auto-increment. */
     String getSqlType(FieldModel field);
 
     /**

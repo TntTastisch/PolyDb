@@ -21,10 +21,28 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+/**
+ * Diffs the desired schema (the parsed {@link EntityModel}s) against the actual
+ * {@link DatabaseSchema} read from the live database and produces the ordered list of
+ * {@link SchemaChange}s needed to reconcile them. It only ever adds structure — missing tables,
+ * columns and foreign keys — and never drops existing objects, so running it is non-destructive.
+ *
+ * <p>The hard part is ordering: a foreign key can only be created once its referenced table exists.
+ * The comparator topologically orders new tables, emits each table's foreign keys inline when the
+ * target is already available, and defers the rest (cycle-closing or forward references) to
+ * {@code ALTER TABLE} statements appended at the end.</p>
+ */
 public class SchemaComparator {
 
     private static final Logger log = LoggerFactory.getLogger(SchemaComparator.class);
 
+    /**
+     * Computes the changes required to bring {@code dbSchema} in line with {@code entities}. Missing
+     * entity tables (and synthesised many-to-many join tables) are scheduled for creation; existing
+     * tables are checked for missing columns and foreign keys.
+     *
+     * @return migration steps in dependency-safe execution order.
+     */
     public List<SchemaChange> compare(List<EntityModel> entities, DatabaseSchema dbSchema) {
         Map<String, EntityModel> entityByClass = new HashMap<>();
         for (EntityModel entity : entities) {
@@ -55,6 +73,12 @@ public class SchemaComparator {
         return assemble(toCreate, columnChanges, existingTableForeignKeys, dbSchema);
     }
 
+    /**
+     * Orders the new tables and decides, per owning foreign key, whether it can be emitted inline
+     * with its {@code CREATE TABLE} (referenced table already available) or must be deferred to a
+     * trailing {@code ALTER TABLE} (cyclic or forward reference). Returns the full statement list in
+     * execution order: creates, then column additions, then deferred and existing-table foreign keys.
+     */
     private List<SchemaChange> assemble(List<EntityModel> toCreate,
                                         List<SchemaChange> columnChanges,
                                         List<SchemaChange> existingTableForeignKeys,
@@ -97,6 +121,10 @@ public class SchemaComparator {
         return result;
     }
 
+    /**
+     * Adds an {@link SchemaChange.AddColumn} for every entity column absent from the existing table.
+     * Existing columns are left untouched (no type/nullability reconciliation is attempted here).
+     */
     private void compareColumns(EntityModel entity, TableSchema dbTable, List<SchemaChange> changes) {
         for (FieldModel field : entity.getFields()) {
             ColumnSchema dbColumn = dbTable.getColumns().get(field.getColumnName().toLowerCase());
@@ -106,6 +134,10 @@ public class SchemaComparator {
         }
     }
 
+    /**
+     * Adds an {@link SchemaChange.AddForeignKey} for every owning relation whose constraint is not
+     * already present on the existing table, so re-running migration does not duplicate constraints.
+     */
     private void compareForeignKeys(EntityModel entity, TableSchema dbTable, List<SchemaChange> changes) {
         for (RelationModel relation : owningColumnRelations(entity)) {
             if (!dbTable.hasForeignKeyOn(relation.getJoinColumnName())) {
@@ -136,6 +168,12 @@ public class SchemaComparator {
 
     // ------------------------------------------------------------------ many-to-many join tables
 
+    /**
+     * Synthesises a virtual {@link EntityModel} for each owning many-to-many's join table (two
+     * id columns plus a foreign key to each side). These pseudo-entities flow through the same
+     * create/order pipeline as real tables. Relations are skipped (with a warning) when target
+     * metadata is unavailable, e.g. the target entity was not part of the scanned set.
+     */
     private List<EntityModel> buildJoinTables(List<EntityModel> entities, Map<String, EntityModel> entityByClass) {
         List<EntityModel> joinTables = new ArrayList<>();
         for (EntityModel entity : entities) {
@@ -161,6 +199,11 @@ public class SchemaComparator {
         return joinTables;
     }
 
+    /**
+     * Assembles the join-table pseudo-entity: both link columns are part of the composite primary
+     * key ({@code id = true}) and each gets an owning many-to-one foreign key back to its side's
+     * table, so the table and its two constraints are generated like any other.
+     */
     private EntityModel buildJoinTable(EntityModel owner, FieldModel ownerId,
                                        EntityModel target, FieldModel targetId,
                                        RelationModel.JoinTableInfo info) {
@@ -256,6 +299,11 @@ public class SchemaComparator {
         return ordered;
     }
 
+    /**
+     * Kahn's algorithm drain step: repeatedly places ready (in-degree zero) tables, decrementing the
+     * in-degree of their dependents and queueing any that become ready. Runs until {@code ready} is
+     * empty, which is either completion or a stall caused by a cycle (resolved by the caller).
+     */
     private void drain(Deque<String> ready, List<EntityModel> ordered, Set<String> placed,
                        Map<String, List<String>> dependents, Map<String, Integer> inDegree,
                        Map<String, EntityModel> byTable) {

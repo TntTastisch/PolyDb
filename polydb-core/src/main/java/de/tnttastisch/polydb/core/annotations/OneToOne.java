@@ -22,11 +22,26 @@ public @interface OneToOne {
      */
     String mappedBy() default "";
 
+    /**
+     * When the associated entity is loaded. Defaults to {@link FetchType#EAGER}.
+     */
     FetchType fetch() default FetchType.EAGER;
 
+    /**
+     * Whether the association may be {@code null}. Defaults to {@code true}. On the owning side
+     * {@code false} produces a {@code NOT NULL} foreign-key column.
+     */
     boolean optional() default true;
 
+    /**
+     * Operations cascaded from this entity to the associated entity. Empty (the default) means no
+     * cascading. See {@link CascadeType}.
+     */
     CascadeType[] cascade() default {};
 
+    /**
+     * The target entity type. When left at the default ({@code void.class}) it is derived from the
+     * declared field type.
+     */
     Class<?> targetEntity() default void.class;
 }

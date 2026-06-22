@@ -14,10 +14,19 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+/**
+ * Verifies how {@link EntityParser} turns annotated entity classes into {@link EntityModel}s, focusing
+ * on relation mapping and field selection. Uses the {@link Author}/{@link Book} fixtures for the
+ * one-to-many / owning many-to-one pair and {@link Gadget} for non-persistent field filtering.
+ */
 class EntityParserRelationTest {
 
     private final EntityParser parser = new EntityParser();
 
+    /**
+     * The {@code @Id} column stays {@code NOT NULL} even though it also carries {@code @Column} (whose
+     * {@code nullable()} defaults to {@code true}); the primary key must never be relaxed to nullable.
+     */
     @Test
     void idColumnStaysNotNullableEvenWithColumnAnnotation() {
         // Author declares @Id @Column(name = "id"); @Column.nullable() defaults to true and must
@@ -31,6 +40,11 @@ class EntityParserRelationTest {
         assertThat(idColumn.isNullable()).isFalse();
     }
 
+    /**
+     * Non-persistent fields are ignored: {@code static}, Java {@code transient} and
+     * {@code @Transient}-annotated fields produce no columns, leaving only {@code id} and {@code name}
+     * and no relations.
+     */
     @Test
     void skipsStaticTransientAndTransientAnnotatedFields() {
         EntityModel model = parser.parseEntity(Gadget.class);
@@ -41,6 +55,12 @@ class EntityParserRelationTest {
         assertThat(model.getRelations()).isEmpty();
     }
 
+    /**
+     * An owning {@code @ManyToOne} produces a foreign-key column ({@code author_id}) typed after the
+     * target's id ({@code UUID}) and made {@code NOT NULL} by {@code optional = false} /
+     * {@code @JoinColumn(nullable = false)}. The resulting {@code MANY_TO_ONE} relation is the owning
+     * side, points at {@code authors(id)} / {@link Author}, and fetches eagerly.
+     */
     @Test
     void owningManyToOneCreatesForeignKeyColumnWithTargetIdType() {
         EntityModel model = parser.parseEntity(Book.class);
@@ -65,6 +85,11 @@ class EntityParserRelationTest {
         assertThat(relation.getFetch()).isEqualTo(FetchType.EAGER);
     }
 
+    /**
+     * The inverse {@code @OneToMany} side owns no foreign-key column (only {@code id}/{@code name}
+     * remain as columns); its {@code ONE_TO_MANY} relation is non-owning, is {@code mappedBy} the
+     * {@code author} field of {@link Book}, and defaults to lazy fetching.
+     */
     @Test
     void inverseOneToManyHasNoColumnAndIsLazyByDefault() {
         EntityModel model = parser.parseEntity(Author.class);

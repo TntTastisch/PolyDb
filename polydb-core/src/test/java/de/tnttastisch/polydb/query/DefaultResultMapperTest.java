@@ -15,8 +15,19 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+/**
+ * Verifies that {@link DefaultResultMapper} coerces JDBC column values into the declared entity field
+ * types, in particular without losing precision. Runs against a real in-memory H2 table populated with
+ * a row whose values stress the type conversions, then maps the {@link ResultSet} onto a local entity.
+ */
 class DefaultResultMapperTest {
 
+    /**
+     * A row of {@code VARCHAR}/{@code BIGINT}/{@code TIMESTAMP} values maps onto the entity's
+     * {@code UUID}/{@code BigDecimal}/{@code LocalDateTime} fields. The {@code BIGINT} is deliberately
+     * larger than {@code 2^53} to prove the mapper does not route it through {@code double} (which would
+     * corrupt the value) but preserves it exactly as a {@link BigDecimal}.
+     */
     @Test
     void coercesJdbcTypesToEntityFieldTypesWithoutPrecisionLoss() throws Exception {
         UUID id = UUID.randomUUID();
@@ -43,6 +54,7 @@ class DefaultResultMapperTest {
         }
     }
 
+    /** Minimal entity exercising the {@code String->UUID}, {@code BIGINT->BigDecimal} and {@code Timestamp->LocalDateTime} mappings. */
     @Entity
     static class Record {
         @Id

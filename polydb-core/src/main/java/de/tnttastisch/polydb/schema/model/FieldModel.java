@@ -2,6 +2,15 @@ package de.tnttastisch.polydb.schema.model;
 
 import java.lang.reflect.Field;
 
+/**
+ * Immutable description of one database column derived from an entity field. Produced by the
+ * {@link de.tnttastisch.polydb.schema.parser.EntityParser} and consumed by the dialect to emit
+ * column DDL and by the repository to bind/read values.
+ *
+ * <p>Most instances map a scalar field directly to a column. A foreign-key column is a special case:
+ * see {@link #relation} — it carries association metadata and its persisted value comes from the
+ * referenced entity rather than from reading the field as-is.</p>
+ */
 public class FieldModel {
 
     private final Field field;

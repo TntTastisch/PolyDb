@@ -26,15 +26,38 @@ public class DefaultResultMapper<T> implements ResultMapper<T> {
     private final Class<T> clazz;
     private final EntityModel model;
 
+    /**
+     * Convenience constructor that parses the entity model from {@code clazz} on the fly. Prefer
+     * {@link #DefaultResultMapper(Class, EntityModel)} when a parsed model is already available to
+     * avoid re-parsing per mapper.
+     *
+     * @param clazz the entity type to map rows onto
+     */
     public DefaultResultMapper(Class<T> clazz) {
         this(clazz, new EntityParser().parseEntity(clazz));
     }
 
+    /**
+     * @param clazz the entity type to map rows onto
+     * @param model the pre-parsed schema model describing {@code clazz}'s columns
+     */
     public DefaultResultMapper(Class<T> clazz, EntityModel model) {
         this.clazz = clazz;
         this.model = model;
     }
 
+    /**
+     * Instantiates the entity via its no-arg constructor and copies each scalar column from the
+     * current row into the matching field, coercing JDBC values to the declared field type. Fields
+     * are accessed reflectively (and forced accessible), so the entity needs no setters. Null columns
+     * leave the field at its default value; foreign-key columns are skipped because associations are
+     * populated separately by the repository.
+     *
+     * @param rs the result set, positioned on the row to map
+     * @return the populated entity
+     * @throws SQLException if instantiation or reflective field access fails, wrapped with the
+     *                      entity class name for context
+     */
     @Override
     public T map(ResultSet rs) throws SQLException {
         try {

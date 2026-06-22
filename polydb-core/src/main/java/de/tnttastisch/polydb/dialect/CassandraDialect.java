@@ -10,6 +10,11 @@ import java.util.List;
  * Cassandra is query-first and has no joins or enforced foreign keys. Relations are modelled through
  * <em>denormalisation</em>, user-defined types (UDTs) or collection columns; referential integrity
  * is not enforced.
+ *
+ * <p>This dialect emits CQL rather than SQL: it implements {@link Dialect} directly instead of
+ * extending {@link AbstractSqlDialect}, because Cassandra lacks foreign keys, has no
+ * {@code MODIFY COLUMN}, and uses its own lowercase type names ({@code text}, {@code uuid},
+ * {@code blob}, …). All foreign-key methods are therefore no-ops.
  */
 public class CassandraDialect implements Dialect {
 
@@ -35,6 +40,10 @@ public class CassandraDialect implements Dialect {
         };
     }
 
+    /**
+     * Builds a CQL {@code CREATE TABLE}. The {@code relations} argument is ignored: Cassandra has no
+     * foreign keys, so only column definitions and the primary key are emitted.
+     */
     @Override
     public String getCreateTableSql(String tableName, List<FieldModel> fields, List<RelationModel> relations) {
         StringBuilder sql = new StringBuilder("CREATE TABLE ");
@@ -66,6 +75,10 @@ public class CassandraDialect implements Dialect {
         return "ALTER TABLE " + tableName + " ADD " + field.getColumnName() + " " + getSqlType(field);
     }
 
+    /**
+     * Cassandra does not allow changing a column's type in place, so there is no migration
+     * statement to emit.
+     */
     @Override
     public String getModifyColumnSql(String tableName, FieldModel field) {
         return null;

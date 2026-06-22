@@ -9,6 +9,16 @@ import de.tnttastisch.polydb.core.annotations.Table;
 
 import java.util.UUID;
 
+/**
+ * Test fixture modelling the owning side of a many-to-one relation: each book references its
+ * {@link Author} through the non-null {@code author_id} foreign key
+ * ({@code @ManyToOne(optional = false)} + {@code @JoinColumn(nullable = false)}), which is eagerly
+ * fetched on read.
+ *
+ * <p>Acts as the "child"/referencing entity throughout the test suite: it drives foreign-key DDL
+ * generation in the dialect tests, the owning {@code MANY_TO_ONE} relation in the parser tests, and
+ * the cascade-persist / eager-load / foreign-key-violation scenarios in the integration tests.</p>
+ */
 @Entity
 @Table(name = "books")
 public class Book {

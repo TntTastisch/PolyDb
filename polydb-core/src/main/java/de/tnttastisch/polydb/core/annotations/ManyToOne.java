@@ -19,12 +19,21 @@ public @interface ManyToOne {
      */
     Class<?> targetEntity() default void.class;
 
+    /**
+     * When the associated entity is loaded. Defaults to {@link FetchType#EAGER}, so the target is
+     * resolved as part of the owning query.
+     */
     FetchType fetch() default FetchType.EAGER;
 
     /**
-     * Whether the association (and therefore the foreign-key column) may be {@code null}.
+     * Whether the association (and therefore the foreign-key column) may be {@code null}. Defaults
+     * to {@code true}; {@code false} produces a {@code NOT NULL} foreign-key column.
      */
     boolean optional() default true;
 
+    /**
+     * Operations cascaded from this entity to the associated entity. Empty (the default) means no
+     * cascading. See {@link CascadeType}.
+     */
     CascadeType[] cascade() default {};
 }

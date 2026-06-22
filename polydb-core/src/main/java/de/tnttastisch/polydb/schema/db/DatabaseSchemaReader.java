@@ -7,8 +7,22 @@ import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 
+/**
+ * Introspects a live database through JDBC {@link DatabaseMetaData} and reconstructs its structure
+ * as a {@link DatabaseSchema}. This is the "actual state" source for migration: the
+ * {@link de.tnttastisch.polydb.schema.comparison.SchemaComparator} diffs the returned schema against
+ * the parsed {@link de.tnttastisch.polydb.schema.model.EntityModel entity models} to compute the DDL.
+ */
 public class DatabaseSchemaReader {
 
+    /**
+     * Reads every {@code TABLE} in the connection's current catalog/schema together with its columns
+     * and foreign keys. Views and other object types are intentionally excluded so only managed
+     * tables are compared. Metadata access failures are wrapped in a {@link PolyDBException} since a
+     * partial schema would lead to incorrect migration decisions.
+     *
+     * @return the reconstructed schema; never {@code null} (empty when the database has no tables).
+     */
     public DatabaseSchema readSchema(Connection connection) {
         DatabaseSchema schema = new DatabaseSchema();
 
@@ -28,6 +42,8 @@ public class DatabaseSchemaReader {
                             int dataType = columns.getInt("DATA_TYPE");
                             String typeName = columns.getString("TYPE_NAME");
                             int columnSize = columns.getInt("COLUMN_SIZE");
+                            // JDBC reports nullability as an int code and auto-increment as a "YES"/"NO"/""
+                            // string; normalise both to plain booleans for the schema model.
                             boolean nullable = columns.getInt("NULLABLE") == DatabaseMetaData.columnNullable;
                             boolean autoIncrement = "YES".equals(columns.getString("IS_AUTOINCREMENT"));
 

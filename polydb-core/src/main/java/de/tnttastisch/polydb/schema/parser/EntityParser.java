@@ -23,8 +23,25 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+/**
+ * Reflective front end of the schema pipeline: turns annotated {@code @Entity} classes into
+ * dialect-independent {@link EntityModel}s. It reads the PolyDB annotations
+ * ({@code @Id}, {@code @Column}, {@code @Index}, the relation annotations, ...) and resolves
+ * conventions (default table/column names, default join columns) so the rest of the pipeline can
+ * work against a uniform model without touching reflection again.
+ *
+ * <p>Relations are expanded here: an owning {@code @ManyToOne}/{@code @OneToOne} additionally yields
+ * a synthetic scalar foreign-key {@link FieldModel} so the column appears in the generated DDL, while
+ * inverse sides ({@code mappedBy}) contribute only relation metadata and no column.</p>
+ */
 public class EntityParser {
 
+    /**
+     * Scans {@code packageName} (and sub-packages) on the classpath for {@code @Entity} classes and
+     * parses each one.
+     *
+     * @return one {@link EntityModel} per discovered entity, ready for comparison/generation.
+     */
     public List<EntityModel> parsePackage(String packageName) {
         Reflections reflections = new Reflections(new ConfigurationBuilder()
                 .forPackage(packageName)
@@ -39,6 +56,18 @@ public class EntityParser {
                 .collect(Collectors.toList());
     }
 
+    /**
+     * Parses a single entity class into its {@link EntityModel}. Declared fields are split into
+     * scalar columns and relations; indexes are collected from both the class-level {@code @Index}
+     * and field-level {@code @Index} annotations.
+     *
+     * <p>Note that fields are walked twice: once to build columns/relations, and a second time to
+     * collect field-level indexes — the index pass runs after column parsing so it can reuse the
+     * resolved column name (honouring {@code @Column.name()}).</p>
+     *
+     * @throws PolyDBException if {@code clazz} is not an {@code @Entity}, or a class-level index
+     *                         declares no columns.
+     */
     public EntityModel parseEntity(Class<?> clazz) {
         if (!clazz.isAnnotationPresent(Entity.class)) {
             throw new PolyDBException("Class " + clazz.getName() + " is not annotated with @Entity");
@@ -94,6 +123,7 @@ public class EntityParser {
                 || field.isAnnotationPresent(Transient.class);
     }
 
+    /** A field is a relation if it carries exactly one of the four association annotations. */
     private boolean isRelation(Field field) {
         return field.isAnnotationPresent(ManyToOne.class)
                 || field.isAnnotationPresent(OneToMany.class)
@@ -101,6 +131,11 @@ public class EntityParser {
                 || field.isAnnotationPresent(ManyToMany.class);
     }
 
+    /**
+     * Builds the {@link FieldModel} for a scalar (non-relation) field, applying annotation overrides
+     * over convention defaults (lower-cased field name as column, length 255, nullable). An
+     * {@code @Id} field is forced NOT NULL and UNIQUE regardless of any {@code @Column} settings.
+     */
     private FieldModel parseField(Field field) {
         String columnName = field.getName().toLowerCase();
         boolean id = field.isAnnotationPresent(Id.class);
@@ -138,6 +173,10 @@ public class EntityParser {
 
     // ------------------------------------------------------------------ relations
 
+    /**
+     * Dispatches a relation field to the parser for its specific association type, after rejecting
+     * fields that carry more than one relation annotation.
+     */
     private void parseRelation(Field field, Class<?> owner, EntityModel entityModel) {
         validateSingleRelationAnnotation(field);
 
@@ -152,6 +191,7 @@ public class EntityParser {
         }
     }
 
+    /** Always the owning side: registers the relation and adds its scalar foreign-key column. */
     private void parseManyToOne(Field field, EntityModel entityModel) {
         ManyToOne annotation = field.getAnnotation(ManyToOne.class);
         Class<?> target = resolveTarget(annotation.targetEntity(), field.getType(), field);
@@ -164,6 +204,10 @@ public class EntityParser {
         entityModel.addField(foreignKeyColumn(relation, target));
     }
 
+    /**
+     * Owning side (no {@code mappedBy}) gets a unique foreign-key column; the inverse side only
+     * records relation metadata pointing back via {@code mappedBy}.
+     */
     private void parseOneToOne(Field field, EntityModel entityModel) {
         OneToOne annotation = field.getAnnotation(OneToOne.class);
         Class<?> target = resolveTarget(annotation.targetEntity(), field.getType(), field);
@@ -186,6 +230,11 @@ public class EntityParser {
         }
     }
 
+    /**
+     * Always the inverse side: a one-to-many is mandatory {@code mappedBy} (the foreign key lives on
+     * the child's many-to-one side), so no column is added here — only relation metadata. The target
+     * type is taken from the collection's element type.
+     */
     private void parseOneToMany(Field field, EntityModel entityModel) {
         OneToMany annotation = field.getAnnotation(OneToMany.class);
         if (annotation.mappedBy().isEmpty()) {
@@ -202,6 +251,11 @@ public class EntityParser {
                 .build());
     }
 
+    /**
+     * Owning side (no {@code mappedBy}) resolves the join table linking both ids; the inverse side
+     * records only relation metadata. Neither side adds a column on the entity's own table — the
+     * link columns live on the synthesised join table built later by the comparator.
+     */
     private void parseManyToMany(Field field, Class<?> owner, EntityModel entityModel) {
         ManyToMany annotation = field.getAnnotation(ManyToMany.class);
         Class<?> target = resolveTarget(annotation.targetEntity(), collectionElementType(field), field);
@@ -228,6 +282,12 @@ public class EntityParser {
         }
     }
 
+    /**
+     * Builds the relation metadata for an owning to-one association, applying {@code @JoinColumn}
+     * overrides or falling back to conventions ({@code <field>_id} for the column, the target's id
+     * column as the referenced column). The column is nullable only when the relation is optional
+     * <em>and</em> the join column is not explicitly marked non-null.
+     */
     private RelationModel buildOwningRelation(RelationType type, Field field, Class<?> target,
                                               boolean optional, FetchType fetch, Set<CascadeType> cascade) {
         JoinColumn joinColumn = field.getAnnotation(JoinColumn.class);
@@ -278,6 +338,11 @@ public class EntityParser {
         }
     }
 
+    /**
+     * Picks the target entity class: an explicit {@code targetEntity()} wins, otherwise the field's
+     * own type (or collection element type) is used. {@code void.class} is the annotation's "unset"
+     * sentinel and is treated as absent.
+     */
     private Class<?> resolveTarget(Class<?> declared, Class<?> fallback, Field field) {
         Class<?> target = declared != null && declared != void.class ? declared : fallback;
         if (target == null || target == void.class) {
@@ -287,6 +352,11 @@ public class EntityParser {
         return target;
     }
 
+    /**
+     * Extracts {@code E} from a {@code Collection<E>}-typed field via its generic signature; returns
+     * {@code null} when the field is not a collection or its element type cannot be resolved to a
+     * concrete class (e.g. a wildcard or type variable).
+     */
     private Class<?> collectionElementType(Field field) {
         if (!Collection.class.isAssignableFrom(field.getType())) {
             return null;
@@ -326,6 +396,7 @@ public class EntityParser {
         return null;
     }
 
+    /** Resolves the column name of the target's {@code @Id} field (honouring {@code @Column.name()}). */
     private String idColumnNameOf(Class<?> target) {
         Field idField = requireIdField(target);
         if (idField.isAnnotationPresent(Column.class)) {
@@ -337,6 +408,7 @@ public class EntityParser {
         return idField.getName().toLowerCase();
     }
 
+    /** Table name from {@code @Table.name()}, defaulting to the lower-cased simple class name. */
     private String tableNameOf(Class<?> clazz) {
         if (clazz.isAnnotationPresent(Table.class)) {
             Table table = clazz.getAnnotation(Table.class);
@@ -347,6 +419,10 @@ public class EntityParser {
         return clazz.getSimpleName().toLowerCase();
     }
 
+    /**
+     * Resolves the join-table coordinates for a many-to-many: explicit {@code @JoinTable} values, or
+     * conventions ({@code owner_target} table, {@code owner_id}/{@code target_id} link columns).
+     */
     private RelationModel.JoinTableInfo resolveJoinTable(Field field, Class<?> owner, Class<?> target) {
         if (field.isAnnotationPresent(JoinTable.class)) {
             JoinTable jt = field.getAnnotation(JoinTable.class);
@@ -369,6 +445,10 @@ public class EntityParser {
         return field.getDeclaringClass().getSimpleName() + "." + field.getName();
     }
 
+    /**
+     * Converts an {@code @Index} annotation to an {@link IndexModel}. When the annotation lists no
+     * columns (a field-level index), {@code defaultColumn} is used as the single covered column.
+     */
     private IndexModel parseIndexAnnotation(Index index, String defaultColumn) {
         String name = index.name();
         List<String> columns = Arrays.asList(index.columns());

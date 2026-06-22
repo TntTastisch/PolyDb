@@ -11,6 +11,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * Test fixture modelling the inverse (non-owning) side of a one-to-many relation: an author owns a
+ * collection of {@link Book}s mapped by {@code Book.author}. The relation is {@code LAZY}
+ * by default and cascades {@link CascadeType#PERSIST}, so saving an author also persists its books.
+ *
+ * <p>Used by the relation and lifecycle integration tests as well as the parser, dialect and schema
+ * comparison tests as the "parent"/referenced entity of the author &harr; book relationship.</p>
+ */
 @Entity
 @Table(name = "authors")
 public class Author {

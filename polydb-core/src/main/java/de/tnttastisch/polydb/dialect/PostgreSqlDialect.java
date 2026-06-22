@@ -2,6 +2,15 @@ package de.tnttastisch.polydb.dialect;
 
 import de.tnttastisch.polydb.schema.model.FieldModel;
 
+/**
+ * Dialect for PostgreSQL. Uses standard double-quoted identifiers and supports foreign keys, both
+ * inherited from {@link AbstractSqlDialect}.
+ *
+ * <p>Notable quirks: PostgreSQL encodes auto-increment in the <em>column type</em> rather than via a
+ * trailing keyword. An auto-incrementing {@code int}/{@code long} becomes {@code SERIAL}/
+ * {@code BIGSERIAL}, so {@link #getAutoIncrementKeyword()} returns an empty string. Native
+ * {@code UUID} and {@code TIMESTAMPTZ} types are used, and the catch-all type is {@code TEXT}.
+ */
 public class PostgreSqlDialect extends AbstractSqlDialect {
 
     @Override
@@ -27,11 +36,20 @@ public class PostgreSqlDialect extends AbstractSqlDialect {
         };
     }
 
+    /**
+     * No trailing keyword: auto-increment is conveyed through the {@code SERIAL}/{@code BIGSERIAL}
+     * type chosen in {@link #getSqlType(FieldModel)}.
+     */
     @Override
     protected String getAutoIncrementKeyword() {
         return "";
     }
 
+    /**
+     * PostgreSQL cannot change a column's type and its nullability in a single clause, so type and
+     * the {@code SET}/{@code DROP NOT NULL} change are emitted as two comma-separated
+     * {@code ALTER COLUMN} actions within one statement.
+     */
     @Override
     public String getModifyColumnSql(String tableName, FieldModel field) {
         return "ALTER TABLE " + tableName + " ALTER COLUMN " + field.getColumnName() + " TYPE " + getSqlType(field) +

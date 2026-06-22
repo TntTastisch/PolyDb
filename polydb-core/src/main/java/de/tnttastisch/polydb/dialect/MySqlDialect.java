@@ -5,6 +5,15 @@ import de.tnttastisch.polydb.schema.model.RelationModel;
 
 import java.util.List;
 
+/**
+ * Dialect for MySQL. Serves as the base for the {@link MariaDbDialect}, which only diverges on a
+ * handful of type mappings.
+ *
+ * <p>Notable quirks: identifiers are quoted with backticks rather than the standard double quote;
+ * tables are created with {@code ENGINE=InnoDB} so that foreign keys are actually enforced (the
+ * legacy MyISAM engine silently ignores them); {@code boolean} maps to {@code TINYINT(1)} since
+ * MySQL has no dedicated boolean type, and time-zone-aware timestamps fall back to {@code DATETIME(6)}.
+ */
 public class MySqlDialect extends AbstractSqlDialect {
 
     @Override
@@ -43,6 +52,9 @@ public class MySqlDialect extends AbstractSqlDialect {
         return "AUTO_INCREMENT";
     }
 
+    /**
+     * MySQL quotes identifiers with backticks instead of the SQL-standard double quote.
+     */
     @Override
     public String quoteIdentifier(String identifier) {
         if (identifier == null) return null;
