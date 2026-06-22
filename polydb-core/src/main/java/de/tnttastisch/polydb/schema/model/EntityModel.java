@@ -9,6 +9,7 @@ public class EntityModel {
     private final String tableName;
     private final List<FieldModel> fields = new ArrayList<>();
     private final List<IndexModel> indexes = new ArrayList<>();
+    private final List<RelationModel> relations = new ArrayList<>();
 
     public EntityModel(String className, String tableName) {
         this.className = className;
@@ -37,5 +38,13 @@ public class EntityModel {
 
     public void addIndex(IndexModel index) {
         this.indexes.add(index);
+    }
+
+    public List<RelationModel> getRelations() {
+        return relations;
+    }
+
+    public void addRelation(RelationModel relation) {
+        this.relations.add(relation);
     }
 }
