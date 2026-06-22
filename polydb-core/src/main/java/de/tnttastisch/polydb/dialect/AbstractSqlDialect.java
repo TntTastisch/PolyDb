@@ -2,6 +2,7 @@ package de.tnttastisch.polydb.dialect;
 
 import de.tnttastisch.polydb.schema.model.FieldModel;
 import de.tnttastisch.polydb.schema.model.IndexModel;
+import de.tnttastisch.polydb.schema.model.RelationModel;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -10,7 +11,7 @@ import java.util.stream.Collectors;
 public abstract class AbstractSqlDialect implements Dialect {
 
     @Override
-    public String getCreateTableSql(String tableName, List<FieldModel> fields) {
+    public String getCreateTableSql(String tableName, List<FieldModel> fields, List<RelationModel> relations) {
         StringBuilder sql = new StringBuilder("CREATE TABLE ");
         sql.append(tableName).append(" (\n");
 
@@ -39,9 +40,30 @@ public abstract class AbstractSqlDialect implements Dialect {
             definitions.add("  PRIMARY KEY (" + String.join(", ", pkColumns) + ")");
         }
 
+        if (supportsForeignKeys() && relations != null) {
+            for (RelationModel relation : relations) {
+                if (isInlineForeignKey(relation)) {
+                    String constraintName = foreignKeyConstraintName(tableName, relation.getJoinColumnName());
+                    definitions.add("  " + getForeignKeyDefinition(
+                            constraintName,
+                            relation.getJoinColumnName(),
+                            relation.getReferencedTable(),
+                            relation.getReferencedColumnName()));
+                }
+            }
+        }
+
         sql.append(String.join(",\n", definitions));
         sql.append("\n)");
         return sql.toString();
+    }
+
+    /**
+     * An owning relation that owns a single foreign-key column on this table (many-to-one or owning
+     * one-to-one). Many-to-many relations carry their foreign keys on a separate join table.
+     */
+    private boolean isInlineForeignKey(RelationModel relation) {
+        return relation.isOwningSide() && relation.getJoinColumnName() != null;
     }
 
     protected abstract String getAutoIncrementKeyword();
@@ -84,5 +106,41 @@ public abstract class AbstractSqlDialect implements Dialect {
     public String quoteIdentifier(String identifier) {
         if (identifier == null) return null;
         return "\"" + identifier + "\"";
+    }
+
+    // ------------------------------------------------------------------ foreign keys
+
+    @Override
+    public boolean supportsForeignKeys() {
+        return true;
+    }
+
+    @Override
+    public boolean supportsAddForeignKeyViaAlter() {
+        return true;
+    }
+
+    @Override
+    public String getForeignKeyDefinition(String constraintName, String column, String refTable, String refColumn) {
+        return "CONSTRAINT " + constraintName + " FOREIGN KEY (" + column + ") REFERENCES " + refTable + " (" + refColumn + ")";
+    }
+
+    @Override
+    public String getAddForeignKeySql(String tableName, String constraintName, String column, String refTable, String refColumn) {
+        return "ALTER TABLE " + tableName + " ADD CONSTRAINT " + constraintName +
+                " FOREIGN KEY (" + column + ") REFERENCES " + refTable + " (" + refColumn + ")";
+    }
+
+    @Override
+    public String getEnableForeignKeysStatement() {
+        return null;
+    }
+
+    /**
+     * Deterministic, reproducible constraint name so a foreign key can be added inline at creation
+     * time and later detected / dropped.
+     */
+    public static String foreignKeyConstraintName(String tableName, String column) {
+        return "fk_" + tableName + "_" + column;
     }
 }

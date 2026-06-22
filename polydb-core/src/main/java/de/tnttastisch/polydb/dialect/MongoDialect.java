@@ -2,15 +2,22 @@ package de.tnttastisch.polydb.dialect;
 
 import de.tnttastisch.polydb.schema.model.FieldModel;
 import de.tnttastisch.polydb.schema.model.IndexModel;
+import de.tnttastisch.polydb.schema.model.RelationModel;
 
 import java.util.List;
 
+/**
+ * MongoDB has no notion of SQL joins or enforced foreign keys. Relations are a modelling concern:
+ * use <em>embedding</em> (nested documents) or <em>referencing</em> (store the foreign {@code _id}
+ * and resolve via a second query or {@code $lookup}); referential integrity is not enforced.
+ */
 public class MongoDialect implements Dialect {
 
     @Override
     public String getName() {
         return "MongoDB";
     }
+
 
     @Override
     public String getSqlType(FieldModel field) {
@@ -28,7 +35,7 @@ public class MongoDialect implements Dialect {
     }
 
     @Override
-    public String getCreateTableSql(String tableName, List<FieldModel> fields) {
+    public String getCreateTableSql(String tableName, List<FieldModel> fields, List<RelationModel> relations) {
         return "db.createCollection('" + tableName + "')";
     }
 
@@ -74,5 +81,32 @@ public class MongoDialect implements Dialect {
     public String quoteIdentifier(String identifier) {
         if (identifier == null) return null;
         return "'" + identifier + "'";
+    }
+
+    // ------------------------------------------------------------------ foreign keys (no-op)
+
+    @Override
+    public boolean supportsForeignKeys() {
+        return false;
+    }
+
+    @Override
+    public boolean supportsAddForeignKeyViaAlter() {
+        return false;
+    }
+
+    @Override
+    public String getForeignKeyDefinition(String constraintName, String column, String refTable, String refColumn) {
+        return null;
+    }
+
+    @Override
+    public String getAddForeignKeySql(String tableName, String constraintName, String column, String refTable, String refColumn) {
+        return null;
+    }
+
+    @Override
+    public String getEnableForeignKeysStatement() {
+        return null;
     }
 }

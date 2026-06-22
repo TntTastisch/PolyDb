@@ -2,9 +2,15 @@ package de.tnttastisch.polydb.dialect;
 
 import de.tnttastisch.polydb.schema.model.FieldModel;
 import de.tnttastisch.polydb.schema.model.IndexModel;
+import de.tnttastisch.polydb.schema.model.RelationModel;
 
 import java.util.List;
 
+/**
+ * Cassandra is query-first and has no joins or enforced foreign keys. Relations are modelled through
+ * <em>denormalisation</em>, user-defined types (UDTs) or collection columns; referential integrity
+ * is not enforced.
+ */
 public class CassandraDialect implements Dialect {
 
     @Override
@@ -30,7 +36,7 @@ public class CassandraDialect implements Dialect {
     }
 
     @Override
-    public String getCreateTableSql(String tableName, List<FieldModel> fields) {
+    public String getCreateTableSql(String tableName, List<FieldModel> fields, List<RelationModel> relations) {
         StringBuilder sql = new StringBuilder("CREATE TABLE ");
         sql.append(tableName).append(" (\n");
 
@@ -90,5 +96,32 @@ public class CassandraDialect implements Dialect {
     public String quoteIdentifier(String identifier) {
         if (identifier == null) return null;
         return "\"" + identifier + "\"";
+    }
+
+    // ------------------------------------------------------------------ foreign keys (no-op)
+
+    @Override
+    public boolean supportsForeignKeys() {
+        return false;
+    }
+
+    @Override
+    public boolean supportsAddForeignKeyViaAlter() {
+        return false;
+    }
+
+    @Override
+    public String getForeignKeyDefinition(String constraintName, String column, String refTable, String refColumn) {
+        return null;
+    }
+
+    @Override
+    public String getAddForeignKeySql(String tableName, String constraintName, String column, String refTable, String refColumn) {
+        return null;
+    }
+
+    @Override
+    public String getEnableForeignKeysStatement() {
+        return null;
     }
 }
