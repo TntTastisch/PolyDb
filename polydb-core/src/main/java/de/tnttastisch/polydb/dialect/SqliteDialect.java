@@ -29,4 +29,21 @@ public class SqliteDialect extends AbstractSqlDialect {
     public String getModifyColumnSql(String tableName, FieldModel field) {
         return "-- SQLite does not support MODIFY COLUMN for " + field.getColumnName();
     }
+
+    /**
+     * SQLite cannot add a foreign key to an existing table; foreign keys are only declared inline at
+     * {@code CREATE TABLE} time.
+     */
+    @Override
+    public boolean supportsAddForeignKeyViaAlter() {
+        return false;
+    }
+
+    /**
+     * Foreign-key enforcement is off by default in SQLite and must be enabled per connection.
+     */
+    @Override
+    public String getEnableForeignKeysStatement() {
+        return "PRAGMA foreign_keys = ON";
+    }
 }

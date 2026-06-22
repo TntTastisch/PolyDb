@@ -37,6 +37,8 @@ public class DatabaseSchemaReader {
                         }
                     }
 
+                    readForeignKeys(metaData, catalog, schemaName, tableName, tableSchema);
+
                     schema.addTable(tableSchema);
                 }
             }
@@ -44,6 +46,21 @@ public class DatabaseSchemaReader {
             return schema;
         } catch (SQLException e) {
             throw new PolyDBException("Failed to read database schema", e);
+        }
+    }
+
+    /**
+     * Reads the foreign keys originating from {@code tableName} so existing constraints are not
+     * recreated. Failures are tolerated: some drivers do not fully support {@code getImportedKeys}.
+     */
+    private void readForeignKeys(DatabaseMetaData metaData, String catalog, String schemaName,
+                                 String tableName, TableSchema tableSchema) {
+        try (ResultSet keys = metaData.getImportedKeys(catalog, schemaName, tableName)) {
+            while (keys.next()) {
+                tableSchema.addForeignKeyColumn(keys.getString("FKCOLUMN_NAME"));
+            }
+        } catch (SQLException ignored) {
+            // Driver does not support imported-key metadata; treat as "no known foreign keys".
         }
     }
 }

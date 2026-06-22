@@ -15,6 +15,14 @@ public class FieldModel {
     private final int precision;
     private final int scale;
 
+    /**
+     * When non-null, this column is the foreign-key column of an owning relation. Its
+     * {@link #field} is the association field (e.g. {@code User author}) while {@link #type} is the
+     * referenced entity's id type, so the dialect picks the correct SQL type. Persistence of this
+     * column is handled through the relation, not by reading the association field directly.
+     */
+    private RelationModel relation;
+
     public FieldModel(Field field, String columnName, Class<?> type, boolean id, boolean autoIncrement, boolean nullable, boolean unique, int length, int precision, int scale) {
         this.field = field;
         this.columnName = columnName;
@@ -66,5 +74,23 @@ public class FieldModel {
 
     public int getScale() {
         return scale;
+    }
+
+    /**
+     * The owning relation this column belongs to, or {@code null} for a plain scalar column.
+     */
+    public RelationModel getRelation() {
+        return relation;
+    }
+
+    public void setRelation(RelationModel relation) {
+        this.relation = relation;
+    }
+
+    /**
+     * @return {@code true} if this column is the foreign-key column of an owning relation.
+     */
+    public boolean isForeignKey() {
+        return relation != null;
     }
 }

@@ -1,12 +1,24 @@
 package de.tnttastisch.polydb.dialect;
 
 import de.tnttastisch.polydb.schema.model.FieldModel;
+import de.tnttastisch.polydb.schema.model.RelationModel;
+
+import java.util.List;
 
 public class MySqlDialect extends AbstractSqlDialect {
 
     @Override
     public String getName() {
         return "MySQL";
+    }
+
+    /**
+     * Foreign keys require the InnoDB storage engine (the modern default), so we declare it
+     * explicitly to be safe.
+     */
+    @Override
+    public String getCreateTableSql(String tableName, List<FieldModel> fields, List<RelationModel> relations) {
+        return super.getCreateTableSql(tableName, fields, relations) + " ENGINE=InnoDB";
     }
 
     @Override
