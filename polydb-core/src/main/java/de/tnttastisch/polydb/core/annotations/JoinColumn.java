@@ -22,5 +22,10 @@ public @interface JoinColumn {
      */
     String referencedColumnName() default "";
 
+    /**
+     * Whether the foreign-key column may be {@code null}. Defaults to {@code true}. Note that the
+     * association's own {@code optional} flag (e.g. {@link ManyToOne#optional()}) typically governs
+     * nullability; this element lets the column be configured directly.
+     */
     boolean nullable() default true;
 }

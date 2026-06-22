@@ -2,6 +2,16 @@ package de.tnttastisch.polydb.dialect;
 
 import de.tnttastisch.polydb.schema.model.FieldModel;
 
+/**
+ * Dialect for Oracle Database. Uses standard double-quoted identifiers and supports foreign keys,
+ * both inherited from {@link AbstractSqlDialect}.
+ *
+ * <p>Notable quirks: Oracle has no plain {@code INTEGER}/{@code BOOLEAN} types, so numeric and
+ * boolean values map onto {@code NUMBER} with an explicit precision ({@code NUMBER(1)} stands in for
+ * boolean); strings use {@code VARCHAR2} rather than {@code VARCHAR}; {@code UUID} is stored as a
+ * 16-byte {@code RAW(16)}. Auto-increment uses identity columns ({@code GENERATED AS IDENTITY},
+ * available since Oracle 12c).
+ */
 public class OracleDialect extends AbstractSqlDialect {
 
     @Override
@@ -32,12 +42,18 @@ public class OracleDialect extends AbstractSqlDialect {
         return "GENERATED AS IDENTITY";
     }
 
+    /**
+     * Oracle uses {@code MODIFY} (like the base dialect) but spells out the nullability explicitly:
+     * an unqualified {@code MODIFY} keeps the existing nullability, so {@code NULL}/{@code NOT NULL}
+     * is always appended.
+     */
     @Override
     public String getModifyColumnSql(String tableName, FieldModel field) {
         return "ALTER TABLE " + tableName + " MODIFY " + field.getColumnName() + " " + getSqlType(field) +
                 (field.isNullable() ? " NULL" : " NOT NULL");
     }
 
+    // Spelled out explicitly though it matches the default; Oracle requires the DROP COLUMN form.
     @Override
     public String getDropColumnSql(String tableName, String columnName) {
         return "ALTER TABLE " + tableName + " DROP COLUMN " + columnName;

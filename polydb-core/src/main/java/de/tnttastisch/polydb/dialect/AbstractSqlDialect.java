@@ -8,6 +8,17 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
+/**
+ * Base class for SQL dialects. Provides standards-based DDL generation shared across vendors:
+ * {@code CREATE TABLE} assembly (column definitions, {@code NOT NULL}, auto-increment, {@code UNIQUE},
+ * primary key and inline foreign-key constraints), the {@code ALTER TABLE} variants, double-quoted
+ * identifier quoting, and full foreign-key support enabled by default.
+ *
+ * <p>Concrete dialects supply their vendor's {@linkplain #getSqlType(FieldModel) type mappings} and
+ * {@linkplain #getAutoIncrementKeyword() auto-increment keyword}, and override only the statements
+ * their backend spells differently (most commonly {@link #getModifyColumnSql} and identifier
+ * quoting).
+ */
 public abstract class AbstractSqlDialect implements Dialect {
 
     @Override
@@ -66,6 +77,12 @@ public abstract class AbstractSqlDialect implements Dialect {
         return relation.isOwningSide() && relation.getJoinColumnName() != null;
     }
 
+    /**
+     * The keyword appended to an auto-increment column definition (e.g. {@code AUTO_INCREMENT},
+     * {@code IDENTITY(1,1)}, {@code GENERATED ALWAYS AS IDENTITY}). Returns an empty string for
+     * dialects that encode auto-increment in the column type instead (e.g. PostgreSQL's
+     * {@code SERIAL}).
+     */
     protected abstract String getAutoIncrementKeyword();
 
     @Override

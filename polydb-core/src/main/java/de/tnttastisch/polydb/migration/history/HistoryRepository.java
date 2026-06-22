@@ -8,10 +8,19 @@ import java.sql.*;
 import java.util.HashSet;
 import java.util.Set;
 
+/**
+ * Tracks which {@link de.tnttastisch.polydb.migration.core.Migration migrations} have been applied,
+ * backed by the {@value #TABLE_NAME} table. Each row records a {@code version} (primary key), its
+ * {@code description}, the {@code installed_on} timestamp and a {@code success} flag, so the
+ * {@link de.tnttastisch.polydb.migration.core.MigrationRunner} can skip versions that have already
+ * run and retry ones that previously failed.
+ */
 public class HistoryRepository {
 
     private final DataSource dataSource;
     private final Dialect dialect;
+
+    /** Name of the schema-history table managed by PolyDB. */
     private static final String TABLE_NAME = "polydb_schema_history";
 
     public HistoryRepository(DataSource dataSource, Dialect dialect) {
@@ -19,6 +28,12 @@ public class HistoryRepository {
         this.dialect = dialect;
     }
 
+    /**
+     * Creates the history table if it does not already exist. The presence check uses JDBC metadata
+     * with an upper-cased table name to match databases that store identifiers in upper case.
+     *
+     * @throws PolyDBException if the existence check or creation fails
+     */
     public void ensureHistoryTable() {
         try (Connection conn = dataSource.getConnection()) {
             DatabaseMetaData meta = conn.getMetaData();
@@ -32,6 +47,7 @@ public class HistoryRepository {
         }
     }
 
+    /** Issues the DDL for the history table using portable column types understood by all dialects. */
     private void createHistoryTable(Connection conn) throws SQLException {
         String sql = "CREATE TABLE " + TABLE_NAME + " (" +
                 "version VARCHAR(50) PRIMARY KEY, " +
@@ -44,6 +60,12 @@ public class HistoryRepository {
         }
     }
 
+    /**
+     * Returns the set of versions that have been applied <em>successfully</em>. Only these are
+     * skipped by the runner, so a previously failed version (success = false) is not included and
+     * will be retried. A query failure (e.g. the table not existing yet) is swallowed and treated as
+     * "nothing applied".
+     */
     public Set<String> getAppliedVersions() {
         Set<String> versions = new HashSet<>();
         String sql = "SELECT version FROM " + TABLE_NAME + " WHERE success = true";
@@ -59,6 +81,13 @@ public class HistoryRepository {
         return versions;
     }
 
+    /**
+     * Inserts a row recording the outcome of a migration attempt. Called once per migration by the
+     * runner: with {@code success = true} after a clean apply, or {@code success = false} when the
+     * migration threw.
+     *
+     * @throws PolyDBException if the insert fails
+     */
     public void logMigration(String version, String description, boolean success) {
         String sql = "INSERT INTO " + TABLE_NAME + " (version, description, success) VALUES (?, ?, ?)";
         try (Connection conn = dataSource.getConnection();

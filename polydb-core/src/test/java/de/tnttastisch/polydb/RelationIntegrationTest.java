@@ -11,10 +11,18 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+/**
+ * End-to-end relation behaviour against a real (in-memory H2) database, covering the full
+ * parse &rarr; migrate &rarr; persist &rarr; query path through the {@link PolyDB} facade and its
+ * {@link Repository} instances. Exercises the {@link Author}/{@link Book} one-to-many / many-to-one
+ * pair: cascade-persist, eager loading of the owning side, foreign-key enforcement and idempotent
+ * re-migration. Every test runs on its own uniquely named database with auto-migration enabled.
+ */
 class RelationIntegrationTest {
 
     private static final String ENTITY_PACKAGE = "de.tnttastisch.polydb.testentities";
 
+    /** Starts an isolated in-memory H2-backed PolyDB instance for the database with the given name. */
     private PolyDB start(String name) {
         return PolyDB.builder()
                 .url("jdbc:h2:mem:" + name + ";DB_CLOSE_DELAY=-1")
@@ -25,6 +33,11 @@ class RelationIntegrationTest {
                 .start();
     }
 
+    /**
+     * Saving an author with two attached books persists the children via {@code CascadeType.PERSIST}
+     * with their {@code author_id} foreign key populated, and re-reading a book then eagerly resolves
+     * its owning {@code @ManyToOne} author back from the database.
+     */
     @Test
     void persistsRelatedEntitiesViaCascadeAndLoadsEagerRelationOnRead() {
         try (PolyDB db = start("rel_" + UUID.randomUUID().toString().replace("-", ""))) {
@@ -48,6 +61,10 @@ class RelationIntegrationTest {
         }
     }
 
+    /**
+     * Saving a book whose author was never persisted (the owning many-to-one side does not cascade)
+     * leaves a dangling foreign key, so the database rejects the insert with a runtime exception.
+     */
     @Test
     void enforcesForeignKeyWhenReferencedRowIsMissing() {
         try (PolyDB db = start("fk_" + UUID.randomUUID().toString().replace("-", ""))) {
@@ -61,6 +78,10 @@ class RelationIntegrationTest {
         }
     }
 
+    /**
+     * Auto-migration is idempotent: starting against an already-migrated database (tables and foreign
+     * keys present) detects no schema changes and succeeds, leaving the existing (empty) data intact.
+     */
     @Test
     void secondStartupDetectsNoSchemaChanges() {
         String name = "stable_" + UUID.randomUUID().toString().replace("-", "");

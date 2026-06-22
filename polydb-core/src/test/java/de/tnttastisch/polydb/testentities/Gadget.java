@@ -9,8 +9,12 @@ import de.tnttastisch.polydb.core.annotations.Transient;
 import java.util.UUID;
 
 /**
- * Exercises field filtering: {@code static}, Java {@code transient} and {@link Transient} fields
- * must never become columns.
+ * Test fixture with no relations that exercises field filtering: {@code static}, Java
+ * {@code transient} and {@link Transient}-annotated fields must never become columns, leaving only
+ * {@code id} and {@code name} mapped.
+ *
+ * <p>Used by {@code EntityParserRelationTest} to assert the parser ignores non-persistent fields and
+ * produces an entity model without relations.</p>
  */
 @Entity
 @Table(name = "gadgets")

@@ -5,9 +5,15 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
+/**
+ * Snapshot of a single existing database table: its columns plus the set of columns that already
+ * carry a foreign-key constraint. Built by {@link DatabaseSchemaReader} and held inside a
+ * {@link DatabaseSchema}; the comparator uses it to skip columns/constraints that are already present.
+ */
 public class TableSchema {
 
     private final String name;
+    /** Columns keyed by lower-cased name for case-insensitive look-up. */
     private final Map<String, ColumnSchema> columns = new HashMap<>();
 
     /**
@@ -41,6 +47,10 @@ public class TableSchema {
         }
     }
 
+    /**
+     * @return {@code true} if {@code columnName} already has a foreign-key constraint, so the
+     *         comparator can avoid emitting a duplicate {@code ADD CONSTRAINT}.
+     */
     public boolean hasForeignKeyOn(String columnName) {
         return columnName != null && foreignKeyColumns.contains(columnName.toLowerCase());
     }

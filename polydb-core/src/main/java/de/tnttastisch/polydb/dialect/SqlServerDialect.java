@@ -2,6 +2,16 @@ package de.tnttastisch.polydb.dialect;
 
 import de.tnttastisch.polydb.schema.model.FieldModel;
 
+/**
+ * Dialect for Microsoft SQL Server (T-SQL). Uses standard double-quoted identifiers and supports
+ * foreign keys, both inherited from {@link AbstractSqlDialect}. (SQL Server also accepts the
+ * bracket {@code [name]} form, but quoting falls back to the ANSI double quote.)
+ *
+ * <p>Notable quirks: strings use Unicode {@code NVARCHAR}, switching to {@code NVARCHAR(MAX)} once
+ * the requested length exceeds the 4000-character page limit; {@code boolean} maps to {@code BIT};
+ * auto-increment uses the {@code IDENTITY(1,1)} seed/increment syntax; the binary fallback is
+ * {@code VARBINARY(MAX)}.
+ */
 public class SqlServerDialect extends AbstractSqlDialect {
 
     @Override
@@ -32,6 +42,10 @@ public class SqlServerDialect extends AbstractSqlDialect {
         return "IDENTITY(1,1)";
     }
 
+    /**
+     * SQL Server uses {@code ALTER COLUMN} (not {@code MODIFY}); nullability is restated because an
+     * {@code ALTER COLUMN} that omits it resets the column to nullable.
+     */
     @Override
     public String getModifyColumnSql(String tableName, FieldModel field) {
         return "ALTER TABLE " + tableName + " ALTER COLUMN " + field.getColumnName() + " " + getSqlType(field) +

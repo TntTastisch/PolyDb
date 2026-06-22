@@ -19,8 +19,15 @@ public @interface OneToMany {
      */
     String mappedBy();
 
+    /**
+     * When the associated collection is loaded. Defaults to {@link FetchType#LAZY}.
+     */
     FetchType fetch() default FetchType.LAZY;
 
+    /**
+     * Operations cascaded from this entity to the associated entities. Empty (the default) means
+     * no cascading. See {@link CascadeType}.
+     */
     CascadeType[] cascade() default {};
 
     /**

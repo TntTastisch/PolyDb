@@ -2,6 +2,14 @@ package de.tnttastisch.polydb.dialect;
 
 import de.tnttastisch.polydb.schema.model.FieldModel;
 
+/**
+ * Dialect for IBM DB2. Identifiers use the standard double-quote form inherited from
+ * {@link AbstractSqlDialect}, and foreign keys are fully supported.
+ *
+ * <p>Notable quirks: DB2 has no native boolean type before recent releases, so {@code boolean}
+ * maps to {@code SMALLINT}; auto-increment columns use the SQL-standard
+ * {@code GENERATED ALWAYS AS IDENTITY} clause rather than a vendor keyword.
+ */
 public class Db2Dialect extends AbstractSqlDialect {
 
     @Override
@@ -31,6 +39,10 @@ public class Db2Dialect extends AbstractSqlDialect {
         return "GENERATED ALWAYS AS IDENTITY";
     }
 
+    /**
+     * DB2 spells column-type changes as {@code ALTER COLUMN ... SET DATA TYPE} rather than the
+     * default {@code MODIFY} form.
+     */
     @Override
     public String getModifyColumnSql(String tableName, FieldModel field) {
         return "ALTER TABLE " + tableName + " ALTER COLUMN " + field.getColumnName() + " SET DATA TYPE " + getSqlType(field);

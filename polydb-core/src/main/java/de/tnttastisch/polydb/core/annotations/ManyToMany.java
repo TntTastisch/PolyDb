@@ -21,9 +21,20 @@ public @interface ManyToMany {
      */
     String mappedBy() default "";
 
+    /**
+     * When the associated collection is loaded. Defaults to {@link FetchType#LAZY}.
+     */
     FetchType fetch() default FetchType.LAZY;
 
+    /**
+     * Operations cascaded from this entity to the associated entities. Empty (the default) means
+     * no cascading. See {@link CascadeType}.
+     */
     CascadeType[] cascade() default {};
 
+    /**
+     * The target entity type. When left at the default ({@code void.class}) it is derived from the
+     * generic element type of the annotated collection.
+     */
     Class<?> targetEntity() default void.class;
 }

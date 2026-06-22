@@ -21,11 +21,25 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+/**
+ * Verifies {@link SchemaComparator}: it diffs the desired entity models against the current
+ * {@link DatabaseSchema} and emits ordered {@link SchemaChange}s. Focus areas are dependency-aware
+ * table ordering, when foreign keys are inlined into {@code CREATE TABLE} versus deferred to a
+ * separate {@code ADD FOREIGN KEY}, and adding missing constraints to pre-existing tables. Uses the
+ * {@link Author}/{@link Book} fixtures for the acyclic case and inline {@code NodeA/B/C} fixtures to
+ * construct a dependency cycle.
+ */
 class SchemaComparatorTest {
 
     private final EntityParser parser = new EntityParser();
     private final SchemaComparator comparator = new SchemaComparator();
 
+    /**
+     * Against an empty database the comparator orders {@code CREATE TABLE}s by dependency (the
+     * referenced {@code authors} before the referencing {@code books}) even when the entities are
+     * supplied in the wrong order, and because the graph is acyclic it inlines the foreign key rather
+     * than deferring any to {@code ADD FOREIGN KEY}.
+     */
     @Test
     void createsReferencedTableBeforeReferencingTableWithInlineForeignKey() {
         EntityModel author = parser.parseEntity(Author.class);
@@ -52,6 +66,11 @@ class SchemaComparatorTest {
         assertThat(changes).noneMatch(c -> c instanceof SchemaChange.AddForeignKey);
     }
 
+    /**
+     * When both tables already exist but the {@code books} table lacks its foreign key, the comparator
+     * emits no {@code CREATE TABLE} and instead a single {@code ADD FOREIGN KEY} carrying the correct
+     * table, column, referenced table and deterministic constraint name.
+     */
     @Test
     void addsForeignKeyToExistingTableMissingTheConstraint() {
         EntityModel author = parser.parseEntity(Author.class);
@@ -75,6 +94,12 @@ class SchemaComparatorTest {
         assertThat(fk.getConstraintName()).isEqualTo("fk_books_author_id");
     }
 
+    /**
+     * With a dependency cycle ({@code a <-> b}) plus an acyclic edge ({@code c -> a}), the comparator
+     * still orders {@code a} before its acyclic dependent {@code c} and inlines the satisfiable
+     * {@code c -> a} foreign key, while deferring exactly one foreign key (the one that closes the
+     * {@code a <-> b} cycle) to a separate {@code ADD FOREIGN KEY}.
+     */
     @Test
     void cyclicDependencyDefersOnlyTheCycleClosingForeignKeyAndInlinesAcyclicOnes() {
         // a <-> b form a cycle; c -> a is acyclic. Declared order c, a, b deliberately puts the
@@ -110,6 +135,7 @@ class SchemaComparatorTest {
         assertThat(deferred.get(0).getColumn()).isIn("a_id", "b_id");
     }
 
+    /** Builds the current-schema representation of an already-migrated {@code authors} table. */
     private TableSchema existingAuthorsTable() {
         TableSchema authors = new TableSchema("authors");
         authors.addColumn(new ColumnSchema("id", Types.OTHER, "UUID", 16, false, false));
@@ -117,6 +143,7 @@ class SchemaComparatorTest {
         return authors;
     }
 
+    /** Builds a current {@code books} table that has the {@code author_id} column but no FK constraint. */
     private TableSchema existingBooksTableWithoutForeignKey() {
         TableSchema books = new TableSchema("books");
         books.addColumn(new ColumnSchema("id", Types.OTHER, "UUID", 16, false, false));
@@ -125,6 +152,7 @@ class SchemaComparatorTest {
         return books;
     }
 
+    /** Cycle fixture: {@code a} references {@code b}, forming the {@code a <-> b} cycle with {@link NodeB}. */
     @Entity
     @Table(name = "a")
     static class NodeA {
@@ -136,6 +164,7 @@ class SchemaComparatorTest {
         private NodeB b;
     }
 
+    /** Cycle fixture: {@code b} references {@code a}, closing the {@code a <-> b} cycle. */
     @Entity
     @Table(name = "b")
     static class NodeB {
@@ -147,6 +176,7 @@ class SchemaComparatorTest {
         private NodeA a;
     }
 
+    /** Acyclic fixture: {@code c} references {@code a} only, so its foreign key can always be inlined. */
     @Entity
     @Table(name = "c")
     static class NodeC {

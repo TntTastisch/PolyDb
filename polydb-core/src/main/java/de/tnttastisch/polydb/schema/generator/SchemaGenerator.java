@@ -8,6 +8,12 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Final stage of the schema pipeline: renders the ordered list of {@link SchemaChange}s produced by
+ * the {@link de.tnttastisch.polydb.schema.comparison.SchemaComparator} into executable DDL strings.
+ * It delegates all dialect-specific syntax to the {@link Dialect}, so this class only routes each
+ * change type to the matching dialect method and drops changes the dialect cannot express.
+ */
 public class SchemaGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(SchemaGenerator.class);
@@ -18,6 +24,13 @@ public class SchemaGenerator {
         this.dialect = dialect;
     }
 
+    /**
+     * Renders each change to a DDL statement, in input order so dependencies (e.g. a table before a
+     * foreign key referencing it) are emitted correctly.
+     *
+     * @return the SQL statements to execute; changes that yield no SQL for this dialect are omitted,
+     *         so the result may be shorter than {@code changes}.
+     */
     public List<String> generateSql(List<SchemaChange> changes) {
         List<String> sqlStatements = new ArrayList<>();
 
@@ -31,6 +44,11 @@ public class SchemaGenerator {
         return sqlStatements;
     }
 
+    /**
+     * Maps a single change to its DDL via the dialect, or {@code null} when the dialect cannot emit
+     * it (e.g. a NoSQL dialect with no foreign keys, or one that cannot add a constraint via
+     * {@code ALTER} — in the latter case the constraint should have been declared inline at creation).
+     */
     private String toSql(SchemaChange change) {
         if (change instanceof SchemaChange.CreateTable create) {
             return dialect.getCreateTableSql(

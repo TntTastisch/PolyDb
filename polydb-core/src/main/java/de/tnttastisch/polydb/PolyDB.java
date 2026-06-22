@@ -24,6 +24,26 @@ import java.sql.Connection;
 import java.sql.Statement;
 import java.util.List;
 
+/**
+ * Main entry point and lifecycle owner of the library. A {@code PolyDB} instance wraps a single
+ * database connection (a Hikari-pooled {@link DataSource} for JDBC dialects) together with the
+ * {@link Dialect} detected from the configured URL.
+ *
+ * <p>Typical lifecycle:</p>
+ * <ol>
+ *   <li><b>Build / configure</b> — assemble a {@link PolyDBConfig} (via {@link #builder()} or
+ *       {@link PolyDBConfig#builder()}).</li>
+ *   <li><b>Start</b> — {@link #start(PolyDBConfig)} detects the dialect, opens the pool and runs
+ *       {@link #initialize()}: it parses the entity package, optionally syncs the schema (when
+ *       {@code autoMigration} is enabled) and then applies pending versioned migrations.</li>
+ *   <li><b>Use</b> — obtain a {@link Repository} per entity type via {@link #repository(Class)}.</li>
+ *   <li><b>Close</b> — {@link #close()} (or try-with-resources) shuts down the pool. The instance is
+ *       single-use; once closed it cannot be reopened.</li>
+ * </ol>
+ *
+ * <p>NoSQL dialects (MongoDB, Cassandra) are detected but currently have no {@code DataSource} and no
+ * repository implementation; calling {@link #repository(Class)} on them throws.</p>
+ */
 public class PolyDB implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(PolyDB.class);
@@ -47,6 +67,13 @@ public class PolyDB implements AutoCloseable {
         this.dataSource = createDataSource(config, dialect);
     }
 
+    /**
+     * Creates and fully initializes an instance from the given configuration: detects the dialect,
+     * opens the connection pool and runs schema sync + migrations. The returned instance is ready to
+     * hand out repositories.
+     *
+     * @throws PolyDBException if the URL maps to an unsupported dialect or schema sync fails
+     */
     public static PolyDB start(PolyDBConfig config) {
         PolyDB polyDB = new PolyDB(config);
         polyDB.initialize();
@@ -79,6 +106,7 @@ public class PolyDB implements AutoCloseable {
         close();
     }
 
+    /** Whether {@link #close()} has been called on this instance. */
     public boolean isClosed() {
         return closed;
     }
@@ -113,48 +141,64 @@ public class PolyDB implements AutoCloseable {
         this.nativeClient = nativeClient;
     }
 
+    /** Convenience entry point: a fluent builder that configures and {@link Builder#start() starts} PolyDB in one chain. */
     public static Builder builder() {
         return new Builder();
     }
 
+    /**
+     * Fluent builder that delegates to {@link PolyDBConfig.Builder} and starts the instance directly,
+     * so callers can configure and launch PolyDB without handling a {@link PolyDBConfig} explicitly.
+     */
     public static class Builder {
         private final PolyDBConfig.Builder configBuilder = PolyDBConfig.builder();
 
+        /** Sets the connection URL; drives both pooling and dialect detection. */
         public Builder url(String url) {
             configBuilder.url(url);
             return this;
         }
 
+        /** Sets the database username. */
         public Builder username(String username) {
             configBuilder.username(username);
             return this;
         }
 
+        /** Sets the database password. */
         public Builder password(String password) {
             configBuilder.password(password);
             return this;
         }
 
+        /** Sets an explicit JDBC driver class; usually unnecessary with auto-registering drivers. */
         public Builder driverClassName(String driverClassName) {
             configBuilder.driverClassName(driverClassName);
             return this;
         }
 
+        /** Sets the base package scanned for entities (and, under {@code .migrations}, for migrations). */
         public Builder entityPackage(String entityPackage) {
             configBuilder.entityPackage(entityPackage);
             return this;
         }
 
+        /** Enables or disables automatic schema sync on startup (default {@code true}). */
         public Builder autoMigration(boolean autoMigration) {
             configBuilder.autoMigration(autoMigration);
             return this;
         }
 
+        /** Builds the configuration and {@linkplain PolyDB#start(PolyDBConfig) starts} a ready-to-use instance. */
         public PolyDB start() {
             return PolyDB.start(configBuilder.build());
         }
     }
 
+    /**
+     * Runs the startup pipeline: parse entities, optionally diff and apply schema changes, then run
+     * versioned migrations. Invoked once from {@link #start(PolyDBConfig)}.
+     */
     private void initialize() {
         log.info("Initializing PolyDB...");
 
@@ -162,6 +206,8 @@ public class PolyDB implements AutoCloseable {
         List<EntityModel> entities = parser.parsePackage(config.getEntityPackage());
         log.info("Found {} entities", entities.size());
 
+        // Skip schema sync when disabled or when there is no JDBC data source (NoSQL), but still run
+        // the migration step (which itself no-ops without a data source).
         if (!config.isAutoMigration() || dataSource == null) {
             runMigrations();
             return;
@@ -181,6 +227,7 @@ public class PolyDB implements AutoCloseable {
             }
 
             log.info("Detected {} schema changes, applying...", changes.size());
+            // Translate the dialect-agnostic changes into concrete DDL and apply them sequentially.
             SchemaGenerator generator = new SchemaGenerator(dialect);
             List<String> sqls = generator.generateSql(changes);
 
@@ -198,6 +245,7 @@ public class PolyDB implements AutoCloseable {
         runMigrations();
     }
 
+    /** Applies pending versioned migrations from the entity package's {@code .migrations} sub-package. */
     private void runMigrations() {
         MigrationContext migrationContext = new MigrationContext(dataSource, dialect);
         MigrationRunner migrationRunner = new MigrationRunner(migrationContext);
@@ -235,32 +283,20 @@ public class PolyDB implements AutoCloseable {
         String url = config.getUrl().toLowerCase();
         String protocol = extractProtocol(url);
 
-        switch (protocol) {
-            case "h2":
-                return new H2Dialect();
-            case "mysql":
-                return new MySqlDialect();
-            case "mariadb":
-                return new MariaDbDialect();
-            case "postgresql":
-                return new PostgreSqlDialect();
-            case "sqlite":
-                return new SqliteDialect();
-            case "oracle":
-                return new OracleDialect();
-            case "sqlserver":
-                return new SqlServerDialect();
-            case "firebird":
-                return new FirebirdDialect();
-            case "db2":
-                return new Db2Dialect();
-            case "mongodb":
-                return new MongoDialect();
-            case "cassandra":
-                return new CassandraDialect();
-            default:
-                throw new PolyDBException("Unsupported database dialect for URL: " + config.getUrl());
-        }
+        return switch (protocol) {
+            case "h2" -> new H2Dialect();
+            case "mysql" -> new MySqlDialect();
+            case "mariadb" -> new MariaDbDialect();
+            case "postgresql" -> new PostgreSqlDialect();
+            case "sqlite" -> new SqliteDialect();
+            case "oracle" -> new OracleDialect();
+            case "sqlserver" -> new SqlServerDialect();
+            case "firebird" -> new FirebirdDialect();
+            case "db2" -> new Db2Dialect();
+            case "mongodb" -> new MongoDialect();
+            case "cassandra" -> new CassandraDialect();
+            default -> throw new PolyDBException("Unsupported database dialect for URL: " + config.getUrl());
+        };
     }
 
     private String extractProtocol(String url) {
@@ -277,6 +313,14 @@ public class PolyDB implements AutoCloseable {
         return "unknown";
     }
 
+    /**
+     * Returns a {@link Repository} for the given entity type, backed by this instance's data source
+     * and dialect. A new repository is created per call (they are lightweight); the entity is parsed
+     * on construction.
+     *
+     * @throws IllegalStateException         if this instance has been closed
+     * @throws UnsupportedOperationException for NoSQL dialects, which have no repository support yet
+     */
     public <T> Repository<T> repository(Class<T> entityClass) {
         ensureOpen();
         if (dataSource != null) {
@@ -291,10 +335,12 @@ public class PolyDB implements AutoCloseable {
         }
     }
 
+    /** The underlying connection pool, or {@code null} for NoSQL dialects. Exposed for advanced/JDBC access. */
     public DataSource getDataSource() {
         return dataSource;
     }
 
+    /** The dialect detected from the configured URL. */
     public Dialect getDialect() {
         return dialect;
     }
