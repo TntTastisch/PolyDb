@@ -29,22 +29,49 @@ public class HistoryRepository {
     }
 
     /**
-     * Creates the history table if it does not already exist. The presence check uses JDBC metadata
-     * with an upper-cased table name to match databases that store identifiers in upper case.
+     * Creates the history table if it does not already exist.
      *
      * @throws PolyDBException if the existence check or creation fails
      */
     public void ensureHistoryTable() {
         try (Connection conn = dataSource.getConnection()) {
             DatabaseMetaData meta = conn.getMetaData();
-            try (ResultSet rs = meta.getTables(null, null, TABLE_NAME.toUpperCase(), null)) {
-                if (!rs.next()) {
-                    createHistoryTable(conn);
-                }
+            if (!historyTableExists(meta)) {
+                createHistoryTable(conn);
             }
         } catch (SQLException e) {
             throw new PolyDBException("Failed to ensure history table", e);
         }
+    }
+
+    /**
+     * Checks whether the history table already exists via JDBC metadata.
+     *
+     * <p>{@link DatabaseMetaData#getTables} matches the table-name pattern against identifiers in the
+     * exact case the backend stored them. Databases that fold unquoted identifiers to a single case
+     * disagree on which: Oracle, H2 and DB2 store them upper-cased, PostgreSQL lower-cased. Searching
+     * with a hard-coded {@code toUpperCase()} therefore misses the table on PostgreSQL, which then
+     * re-runs the {@code CREATE TABLE} and fails on the second start with "relation already exists".
+     * The search term is normalised to the backend's storage convention, and the returned names are
+     * compared case-insensitively as a guard against driver quirks.
+     */
+    private boolean historyTableExists(DatabaseMetaData meta) throws SQLException {
+        String pattern;
+        if (meta.storesLowerCaseIdentifiers()) {
+            pattern = TABLE_NAME.toLowerCase();
+        } else if (meta.storesUpperCaseIdentifiers()) {
+            pattern = TABLE_NAME.toUpperCase();
+        } else {
+            pattern = TABLE_NAME;
+        }
+        try (ResultSet rs = meta.getTables(null, null, pattern, null)) {
+            while (rs.next()) {
+                if (TABLE_NAME.equalsIgnoreCase(rs.getString("TABLE_NAME"))) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /** Issues the DDL for the history table using portable column types understood by all dialects. */
