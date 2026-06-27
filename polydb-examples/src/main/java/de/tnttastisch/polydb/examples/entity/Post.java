@@ -1,11 +1,6 @@
 package de.tnttastisch.polydb.examples.entity;
 
-import de.tnttastisch.polydb.core.annotations.Column;
-import de.tnttastisch.polydb.core.annotations.Entity;
-import de.tnttastisch.polydb.core.annotations.Id;
-import de.tnttastisch.polydb.core.annotations.JoinColumn;
-import de.tnttastisch.polydb.core.annotations.ManyToOne;
-import de.tnttastisch.polydb.core.annotations.Table;
+import de.tnttastisch.polydb.core.annotations.*;
 
 import java.util.UUID;
 

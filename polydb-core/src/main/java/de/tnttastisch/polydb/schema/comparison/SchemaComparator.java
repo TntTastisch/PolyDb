@@ -11,15 +11,7 @@ import de.tnttastisch.polydb.schema.model.RelationType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Deque;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 /**
  * Diffs the desired schema (the parsed {@link EntityModel}s) against the actual
@@ -58,10 +50,11 @@ public class SchemaComparator {
             TableSchema dbTable = dbSchema.getTable(entity.getTableName());
             if (dbTable == null) {
                 toCreate.add(entity);
-            } else {
-                compareColumns(entity, dbTable, columnChanges);
-                compareForeignKeys(entity, dbTable, existingTableForeignKeys);
+                continue;
             }
+
+            compareColumns(entity, dbTable, columnChanges);
+            compareForeignKeys(entity, dbTable, existingTableForeignKeys);
         }
 
         for (EntityModel joinTable : buildJoinTables(entities, entityByClass)) {
@@ -79,10 +72,7 @@ public class SchemaComparator {
      * trailing {@code ALTER TABLE} (cyclic or forward reference). Returns the full statement list in
      * execution order: creates, then column additions, then deferred and existing-table foreign keys.
      */
-    private List<SchemaChange> assemble(List<EntityModel> toCreate,
-                                        List<SchemaChange> columnChanges,
-                                        List<SchemaChange> existingTableForeignKeys,
-                                        DatabaseSchema dbSchema) {
+    private List<SchemaChange> assemble(List<EntityModel> toCreate, List<SchemaChange> columnChanges, List<SchemaChange> existingTableForeignKeys, DatabaseSchema dbSchema) {
         List<EntityModel> ordered = topologicalOrder(toCreate);
 
         // Tables that exist by the time a given CREATE runs: pre-existing DB tables plus those
@@ -101,12 +91,13 @@ public class SchemaComparator {
                 boolean referenceReady = refTable != null && (available.contains(refTable) || refTable.equals(table));
                 if (referenceReady) {
                     inline.add(relation);
-                } else {
-                    // Cyclic / forward reference: emit the foreign key after all tables exist.
-                    deferredForeignKeys.add(toAddForeignKey(entity.getTableName(), relation));
-                    log.debug("Deferring foreign key on {}.{} -> {} to ALTER (dependency not yet created)",
-                            entity.getTableName(), relation.getJoinColumnName(), relation.getReferencedTable());
+                    continue;
                 }
+
+                // Cyclic / forward reference: emit the foreign key after all tables exist.
+                deferredForeignKeys.add(toAddForeignKey(entity.getTableName(), relation));
+                log.debug("Deferring foreign key on {}.{} -> {} to ALTER (dependency not yet created)",
+                        entity.getTableName(), relation.getJoinColumnName(), relation.getReferencedTable());
             }
 
             creates.add(new SchemaChange.CreateTable(entity, inline));
@@ -204,9 +195,7 @@ public class SchemaComparator {
      * key ({@code id = true}) and each gets an owning many-to-one foreign key back to its side's
      * table, so the table and its two constraints are generated like any other.
      */
-    private EntityModel buildJoinTable(EntityModel owner, FieldModel ownerId,
-                                       EntityModel target, FieldModel targetId,
-                                       RelationModel.JoinTableInfo info) {
+    private EntityModel buildJoinTable(EntityModel owner, FieldModel ownerId, EntityModel target, FieldModel targetId, RelationModel.JoinTableInfo info) {
         EntityModel joinTable = new EntityModel(info.getTableName(), info.getTableName());
 
         FieldModel ownerColumn = new FieldModel(null, info.getJoinColumn(), ownerId.getType(),
@@ -304,9 +293,7 @@ public class SchemaComparator {
      * in-degree of their dependents and queueing any that become ready. Runs until {@code ready} is
      * empty, which is either completion or a stall caused by a cycle (resolved by the caller).
      */
-    private void drain(Deque<String> ready, List<EntityModel> ordered, Set<String> placed,
-                       Map<String, List<String>> dependents, Map<String, Integer> inDegree,
-                       Map<String, EntityModel> byTable) {
+    private void drain(Deque<String> ready, List<EntityModel> ordered, Set<String> placed, Map<String, List<String>> dependents, Map<String, Integer> inDegree, Map<String, EntityModel> byTable) {
         while (!ready.isEmpty()) {
             String table = ready.poll();
             if (!placed.add(table)) {

@@ -56,14 +56,8 @@ public class HistoryRepository {
      * compared case-insensitively as a guard against driver quirks.
      */
     private boolean historyTableExists(DatabaseMetaData meta) throws SQLException {
-        String pattern;
-        if (meta.storesLowerCaseIdentifiers()) {
-            pattern = TABLE_NAME.toLowerCase();
-        } else if (meta.storesUpperCaseIdentifiers()) {
-            pattern = TABLE_NAME.toUpperCase();
-        } else {
-            pattern = TABLE_NAME;
-        }
+        String pattern = storagePattern(meta);
+
         try (ResultSet rs = meta.getTables(null, null, pattern, null)) {
             while (rs.next()) {
                 if (TABLE_NAME.equalsIgnoreCase(rs.getString("TABLE_NAME"))) {
@@ -72,6 +66,22 @@ public class HistoryRepository {
             }
         }
         return false;
+    }
+
+    /**
+     * Normalises {@link #TABLE_NAME} to the backend's identifier storage convention so the metadata
+     * lookup matches: lower-cased on PostgreSQL, upper-cased on Oracle/H2/DB2, unchanged otherwise.
+     */
+    private String storagePattern(DatabaseMetaData meta) throws SQLException {
+        if (meta.storesLowerCaseIdentifiers()) {
+            return TABLE_NAME.toLowerCase();
+        }
+
+        if (meta.storesUpperCaseIdentifiers()) {
+            return TABLE_NAME.toUpperCase();
+        }
+
+        return TABLE_NAME;
     }
 
     /** Issues the DDL for the history table using portable column types understood by all dialects. */

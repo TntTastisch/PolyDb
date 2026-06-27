@@ -69,8 +69,7 @@ public class DatabaseSchemaReader {
      * Reads the foreign keys originating from {@code tableName} so existing constraints are not
      * recreated. Failures are tolerated: some drivers do not fully support {@code getImportedKeys}.
      */
-    private void readForeignKeys(DatabaseMetaData metaData, String catalog, String schemaName,
-                                 String tableName, TableSchema tableSchema) {
+    private void readForeignKeys(DatabaseMetaData metaData, String catalog, String schemaName, String tableName, TableSchema tableSchema) {
         try (ResultSet keys = metaData.getImportedKeys(catalog, schemaName, tableName)) {
             while (keys.next()) {
                 tableSchema.addForeignKeyColumn(keys.getString("FKCOLUMN_NAME"));

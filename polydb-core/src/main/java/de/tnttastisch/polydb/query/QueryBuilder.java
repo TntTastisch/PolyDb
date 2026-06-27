@@ -65,11 +65,7 @@ public class QueryBuilder {
      */
     public String buildSelect() {
         StringBuilder sql = new StringBuilder("SELECT ");
-        if (selectColumns.isEmpty()) {
-            sql.append("*");
-        } else {
-            sql.append(String.join(", ", selectColumns));
-        }
+        sql.append(selectColumns.isEmpty() ? "*" : String.join(", ", selectColumns));
         sql.append(" FROM ").append(tableName);
 
         if (!whereClauses.isEmpty()) {

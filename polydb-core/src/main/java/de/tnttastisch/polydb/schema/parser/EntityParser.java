@@ -2,25 +2,13 @@ package de.tnttastisch.polydb.schema.parser;
 
 import de.tnttastisch.polydb.core.annotations.*;
 import de.tnttastisch.polydb.core.exception.PolyDBException;
-import de.tnttastisch.polydb.schema.model.EntityModel;
-import de.tnttastisch.polydb.schema.model.FieldModel;
-import de.tnttastisch.polydb.schema.model.IndexModel;
-import de.tnttastisch.polydb.schema.model.RelationModel;
-import de.tnttastisch.polydb.schema.model.RelationType;
+import de.tnttastisch.polydb.schema.model.*;
 import org.reflections.Reflections;
 import org.reflections.scanners.Scanners;
 import org.reflections.util.ConfigurationBuilder;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
-import java.lang.reflect.ParameterizedType;
-import java.lang.reflect.Type;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.EnumSet;
-import java.util.List;
-import java.util.Set;
+import java.lang.reflect.*;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
@@ -75,15 +63,21 @@ public class EntityParser {
 
         EntityModel entityModel = new EntityModel(clazz.getName(), tableNameOf(clazz));
 
+        // A throwaway instance used only to read field initialisers as column defaults (see
+        // parseField). Null when the entity has no usable no-arg constructor, in which case columns
+        // simply fall back to their explicit @Column.defaultValue() (if any).
+        Object template = instantiateTemplate(clazz);
+
         for (Field field : clazz.getDeclaredFields()) {
             if (isSkipped(field)) {
                 continue;
             }
             if (isRelation(field)) {
                 parseRelation(field, clazz, entityModel);
-            } else {
-                entityModel.addField(parseField(field));
+                continue;
             }
+
+            entityModel.addField(parseField(field, template));
         }
 
         if (clazz.isAnnotationPresent(Index.class)) {
@@ -135,8 +129,11 @@ public class EntityParser {
      * Builds the {@link FieldModel} for a scalar (non-relation) field, applying annotation overrides
      * over convention defaults (lower-cased field name as column, length 255, nullable). An
      * {@code @Id} field is forced NOT NULL and UNIQUE regardless of any {@code @Column} settings.
+     *
+     * <p>The column default is taken from {@code @Column.defaultValue()} if set, otherwise derived
+     * from the field's initialised value on {@code template} (see {@link #derivedDefault}).</p>
      */
-    private FieldModel parseField(Field field) {
+    private FieldModel parseField(Field field, Object template) {
         String columnName = field.getName().toLowerCase();
         boolean id = field.isAnnotationPresent(Id.class);
         boolean autoIncrement = false;
@@ -144,6 +141,7 @@ public class EntityParser {
         int length = 255;
         int precision = 0;
         int scale = 0;
+        String defaultValue = "";
 
         boolean unique = field.isAnnotationPresent(Unique.class);
 
@@ -166,9 +164,59 @@ public class EntityParser {
             length = column.length();
             precision = column.precision();
             scale = column.scale();
+            defaultValue = column.defaultValue();
         }
 
-        return new FieldModel(field, columnName, field.getType(), id, autoIncrement, nullable, unique, length, precision, scale);
+        // When no explicit default is declared, derive one from the field's initialised value on a
+        // freshly constructed instance (e.g. {@code private boolean notify = false} -> DEFAULT false).
+        // Skipped for @Id and auto-increment columns, whose values are assigned by the database.
+        if (defaultValue.isEmpty() && !id && !autoIncrement) {
+            defaultValue = derivedDefault(field, template);
+        }
+
+        return new FieldModel(field, columnName, field.getType(), id, autoIncrement, nullable, unique, length, precision, scale, defaultValue);
+    }
+
+    /**
+     * Reads {@code field}'s value from the throwaway {@code template} instance and renders it as a SQL
+     * literal, or {@code ""} when there is no template, the value is {@code null}, or its type has no
+     * obvious literal form (UUIDs, dates, collections, nested entities — use an explicit
+     * {@code @Column.defaultValue()} for those).
+     */
+    private String derivedDefault(Field field, Object template) {
+        if (template == null) {
+            return "";
+        }
+        Object value;
+        try {
+            field.setAccessible(true);
+            value = field.get(template);
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            return "";
+        }
+        if (value instanceof Boolean || value instanceof Number) {
+            return value.toString();
+        }
+        if (value instanceof CharSequence || value instanceof Enum<?>) {
+            String text = value instanceof Enum<?> e ? e.name() : value.toString();
+            return "'" + text.replace("'", "''") + "'";
+        }
+        return "";
+    }
+
+    /**
+     * Builds a throwaway instance via the no-arg constructor purely so {@link #derivedDefault} can read
+     * field initialisers. Returns {@code null} (defaults simply fall back to {@code @Column}) when the
+     * entity has no accessible no-arg constructor or constructing it throws.
+     */
+    private Object instantiateTemplate(Class<?> clazz) {
+        try {
+            Constructor<?> constructor = clazz.getDeclaredConstructor();
+            constructor.setAccessible(true);
+            return constructor.newInstance();
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            return null;
+        }
     }
 
     // ------------------------------------------------------------------ relations
@@ -182,11 +230,20 @@ public class EntityParser {
 
         if (field.isAnnotationPresent(ManyToOne.class)) {
             parseManyToOne(field, entityModel);
-        } else if (field.isAnnotationPresent(OneToOne.class)) {
+            return;
+        }
+
+        if (field.isAnnotationPresent(OneToOne.class)) {
             parseOneToOne(field, entityModel);
-        } else if (field.isAnnotationPresent(OneToMany.class)) {
+            return;
+        }
+
+        if (field.isAnnotationPresent(OneToMany.class)) {
             parseOneToMany(field, entityModel);
-        } else if (field.isAnnotationPresent(ManyToMany.class)) {
+            return;
+        }
+
+        if (field.isAnnotationPresent(ManyToMany.class)) {
             parseManyToMany(field, owner, entityModel);
         }
     }
@@ -219,15 +276,16 @@ public class EntityParser {
                     annotation.optional(), annotation.fetch(), cascade);
             entityModel.addRelation(relation);
             entityModel.addField(foreignKeyColumn(relation, target));
-        } else {
-            entityModel.addRelation(RelationModel.builder(RelationType.ONE_TO_ONE, field, target)
-                    .owningSide(false)
-                    .mappedBy(annotation.mappedBy())
-                    .fetch(annotation.fetch())
-                    .cascade(cascade)
-                    .optional(annotation.optional())
-                    .build());
+            return;
         }
+
+        entityModel.addRelation(RelationModel.builder(RelationType.ONE_TO_ONE, field, target)
+                .owningSide(false)
+                .mappedBy(annotation.mappedBy())
+                .fetch(annotation.fetch())
+                .cascade(cascade)
+                .optional(annotation.optional())
+                .build());
     }
 
     /**
@@ -272,14 +330,15 @@ public class EntityParser {
                     .cascade(cascade)
                     .joinTable(joinTable)
                     .build());
-        } else {
-            entityModel.addRelation(RelationModel.builder(RelationType.MANY_TO_MANY, field, target)
-                    .owningSide(false)
-                    .mappedBy(annotation.mappedBy())
-                    .fetch(annotation.fetch())
-                    .cascade(cascade)
-                    .build());
+            return;
         }
+
+        entityModel.addRelation(RelationModel.builder(RelationType.MANY_TO_MANY, field, target)
+                .owningSide(false)
+                .mappedBy(annotation.mappedBy())
+                .fetch(annotation.fetch())
+                .cascade(cascade)
+                .build());
     }
 
     /**
