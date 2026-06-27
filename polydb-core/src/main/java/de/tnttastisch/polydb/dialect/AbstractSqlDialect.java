@@ -30,6 +30,7 @@ public abstract class AbstractSqlDialect implements Dialect {
         for (FieldModel field : fields) {
             StringBuilder def = new StringBuilder("  ");
             def.append(field.getColumnName()).append(" ").append(getSqlType(field));
+            def.append(defaultClause(field));
             if (!field.isNullable()) {
                 def.append(" NOT NULL");
             }
@@ -88,7 +89,18 @@ public abstract class AbstractSqlDialect implements Dialect {
     @Override
     public String getAddColumnSql(String tableName, FieldModel field) {
         return "ALTER TABLE " + tableName + " ADD " + field.getColumnName() + " " + getSqlType(field) +
-                (field.isNullable() ? "" : " NOT NULL");
+                defaultClause(field) + (field.isNullable() ? "" : " NOT NULL");
+    }
+
+    /**
+     * Renders the {@code DEFAULT} clause for a column, or an empty string when it declares no
+     * default. The value is emitted verbatim (see
+     * {@link de.tnttastisch.polydb.core.annotations.Column#defaultValue()}); supplying one is what
+     * lets a {@code NOT NULL} column be added to a populated table, as the backend backfills the
+     * existing rows with it instead of rejecting the {@code ALTER} for null values.
+     */
+    protected String defaultClause(FieldModel field) {
+        return field.hasDefault() ? " DEFAULT " + field.getDefaultValue() : "";
     }
 
     @Override

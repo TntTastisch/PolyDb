@@ -113,8 +113,7 @@ public abstract class SchemaChange {
         private final String referencedTable;
         private final String referencedColumn;
 
-        public AddForeignKey(String tableName, String constraintName, String column,
-                             String referencedTable, String referencedColumn) {
+        public AddForeignKey(String tableName, String constraintName, String column, String referencedTable, String referencedColumn) {
             this.tableName = tableName;
             this.constraintName = constraintName;
             this.column = column;

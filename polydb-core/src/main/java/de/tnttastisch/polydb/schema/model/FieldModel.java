@@ -23,6 +23,7 @@ public class FieldModel {
     private final int length;
     private final int precision;
     private final int scale;
+    private final String defaultValue;
 
     /**
      * When non-null, this column is the foreign-key column of an owning relation. Its
@@ -33,6 +34,10 @@ public class FieldModel {
     private RelationModel relation;
 
     public FieldModel(Field field, String columnName, Class<?> type, boolean id, boolean autoIncrement, boolean nullable, boolean unique, int length, int precision, int scale) {
+        this(field, columnName, type, id, autoIncrement, nullable, unique, length, precision, scale, "");
+    }
+
+    public FieldModel(Field field, String columnName, Class<?> type, boolean id, boolean autoIncrement, boolean nullable, boolean unique, int length, int precision, int scale, String defaultValue) {
         this.field = field;
         this.columnName = columnName;
         this.type = type;
@@ -43,6 +48,7 @@ public class FieldModel {
         this.length = length;
         this.precision = precision;
         this.scale = scale;
+        this.defaultValue = defaultValue == null ? "" : defaultValue;
     }
 
     public Field getField() {
@@ -83,6 +89,21 @@ public class FieldModel {
 
     public int getScale() {
         return scale;
+    }
+
+    /**
+     * The raw SQL literal emitted in this column's {@code DEFAULT} clause, or {@code ""} when the
+     * column has no default. See {@link de.tnttastisch.polydb.core.annotations.Column#defaultValue()}.
+     */
+    public String getDefaultValue() {
+        return defaultValue;
+    }
+
+    /**
+     * @return {@code true} if this column declares a {@code DEFAULT} value.
+     */
+    public boolean hasDefault() {
+        return defaultValue != null && !defaultValue.isEmpty();
     }
 
     /**

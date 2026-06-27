@@ -54,6 +54,9 @@ public class User {
 
     @Column(name = "email")
     private String email;
+    
+    @Column(name = "is_active")
+    private boolean isActive = false; // initialized by default
 
     @Column(name = "created_at")
     private OffsetDateTime createdAt;
@@ -98,6 +101,14 @@ public class User {
 
     public void setCreatedAt(LocalDateTime createdAt) {
         this.createdAt = createdAt;
+    }
+    
+    public boolean isActive() {
+        return isActive;
+    }
+    
+    public void setActive(boolean active) {
+        isActive = active;
     }
 }
 ```
@@ -176,7 +187,40 @@ Marks the primary key field.
 
 ### `@Column`
 
-Defines column metadata such as name, length, nullability, precision, and scale.
+Defines column metadata such as name, length, nullability, precision, scale, and the column default.
+
+| Attribute | Default | Effect |
+|-----------|---------|--------|
+| `name` | field name (lower-cased) | Column name. |
+| `nullable` | `true` | `false` emits a `NOT NULL` constraint. |
+| `length` | `255` | Length for string columns. |
+| `precision` / `scale` | `0` | Digits / decimal places for numeric columns (`0` = dialect default). |
+| `defaultValue` | `""` | SQL `DEFAULT` for the column (see below). |
+
+#### Column defaults
+
+A column's `DEFAULT` clause is resolved in two ways:
+
+1. **Explicit** &mdash; `@Column(defaultValue = "...")` is emitted **verbatim** as a SQL literal, so it
+   must be valid for the target dialect: `"false"` / `"0"` for booleans/numbers, `"'active'"` (with the
+   inner quotes) for strings, or expressions like `"CURRENT_TIMESTAMP"`.
+2. **Derived** &mdash; when `defaultValue` is left empty, the default is taken from the field's
+   initialised value on a freshly constructed instance. `private boolean isActive = false` yields
+   `DEFAULT false` and `private String role = "user"` yields `DEFAULT 'user'`. Fields left at `null`
+   (and types with no obvious literal form such as `UUID`, dates, or collections) get no `DEFAULT`;
+   use the explicit attribute for those.
+
+```java
+@Column(name = "is_active", nullable = false)
+private boolean isActive = false;          // -> is_active BOOLEAN DEFAULT false NOT NULL
+
+@Column(name = "role", defaultValue = "'guest'")
+private String role = "user";              // explicit wins -> role VARCHAR(255) DEFAULT 'guest'
+```
+
+Having a default &mdash; derived or explicit &mdash; is what makes it safe to add a `NOT NULL` column
+to a table that **already holds rows**: the database backfills the existing rows with it instead of
+rejecting the `ALTER TABLE ... ADD` for containing null values.
 
 ### `@Unique`
 

@@ -11,16 +11,7 @@ import de.tnttastisch.polydb.schema.parser.EntityParser;
 
 import javax.sql.DataSource;
 import java.lang.reflect.Field;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.IdentityHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
@@ -57,8 +48,7 @@ public final class JdbcRepository<T> implements Repository<T> {
         this(entityClass, dataSource, dialect, new HashMap<>());
     }
 
-    private JdbcRepository(Class<T> entityClass, DataSource dataSource, Dialect dialect,
-                           Map<Class<?>, JdbcRepository<?>> registry) {
+    private JdbcRepository(Class<T> entityClass, DataSource dataSource, Dialect dialect, Map<Class<?>, JdbcRepository<?>> registry) {
         this.entityClass = entityClass;
         this.dataSource = dataSource;
         this.dialect = dialect;
@@ -128,9 +118,10 @@ public final class JdbcRepository<T> implements Repository<T> {
             Object id = getValue(entity, idField);
             if (id != null && existsById(id)) {
                 update(entity);
-            } else {
-                insert(entity);
+                return;
             }
+
+            insert(entity);
         } finally {
             inFlight.remove(entity);
         }
@@ -385,20 +376,26 @@ public final class JdbcRepository<T> implements Repository<T> {
 
     private void loadToOne(Object entity, RelationModel relation, Object id, int depth) {
         JdbcRepository<?> targetRepo = repoFor(relation.getTargetEntity());
-        List<Object> matches;
+        String sql = toOneSql(relation, targetRepo);
+        List<Object> matches = targetRepo.queryObjects(sql, listOf(id), depth - 1);
+        setValue(entity, relation.getField(), matches.isEmpty() ? null : matches.get(0));
+    }
+
+    /**
+     * Builds the to-one load query: the owning side joins through its own foreign-key column, the
+     * inverse side filters the target table by the owning relation's join column.
+     */
+    private String toOneSql(RelationModel relation, JdbcRepository<?> targetRepo) {
         if (relation.isOwningSide()) {
-            String sql = "SELECT t.* FROM " + targetRepo.model.getTableName() + " t"
+            return "SELECT t.* FROM " + targetRepo.model.getTableName() + " t"
                     + " JOIN " + model.getTableName() + " p ON p." + relation.getJoinColumnName()
                     + " = t." + relation.getReferencedColumnName()
                     + " WHERE p." + idField.getColumnName() + " = ?";
-            matches = targetRepo.queryObjects(sql, listOf(id), depth - 1);
-        } else {
-            RelationModel backRef = targetRepo.owningRelationByField(relation.getMappedBy());
-            String sql = "SELECT * FROM " + targetRepo.model.getTableName()
-                    + " WHERE " + backRef.getJoinColumnName() + " = ?";
-            matches = targetRepo.queryObjects(sql, listOf(id), depth - 1);
         }
-        setValue(entity, relation.getField(), matches.isEmpty() ? null : matches.get(0));
+
+        RelationModel backRef = targetRepo.owningRelationByField(relation.getMappedBy());
+        return "SELECT * FROM " + targetRepo.model.getTableName()
+                + " WHERE " + backRef.getJoinColumnName() + " = ?";
     }
 
     private void loadOneToMany(Object entity, RelationModel relation, Object id, int depth) {
@@ -415,21 +412,29 @@ public final class JdbcRepository<T> implements Repository<T> {
         String targetTable = targetRepo.model.getTableName();
         String targetId = targetRepo.idField.getColumnName();
 
-        String sql;
-        if (relation.isOwningSide()) {
-            RelationModel.JoinTableInfo joinTable = relation.getJoinTable();
-            sql = "SELECT t.* FROM " + targetTable + " t"
-                    + " JOIN " + joinTable.getTableName() + " j ON j." + joinTable.getInverseJoinColumn() + " = t." + targetId
-                    + " WHERE j." + joinTable.getJoinColumn() + " = ?";
-        } else {
-            RelationModel owning = targetRepo.owningRelationByField(relation.getMappedBy());
-            RelationModel.JoinTableInfo joinTable = owning.getJoinTable();
-            sql = "SELECT t.* FROM " + targetTable + " t"
-                    + " JOIN " + joinTable.getTableName() + " j ON j." + joinTable.getJoinColumn() + " = t." + targetId
-                    + " WHERE j." + joinTable.getInverseJoinColumn() + " = ?";
-        }
+        String sql = manyToManySql(relation, targetRepo, targetTable, targetId);
         List<Object> targets = targetRepo.queryObjects(sql, listOf(id), depth - 1);
         setValue(entity, relation.getField(), toFieldCollection(relation.getField(), targets));
+    }
+
+    /**
+     * Builds the many-to-many load query through the join table. The owning side reads the join
+     * table directly; the inverse side borrows the owning relation's join table and swaps the join
+     * and inverse-join columns.
+     */
+    private String manyToManySql(RelationModel relation, JdbcRepository<?> targetRepo, String targetTable, String targetId) {
+        if (relation.isOwningSide()) {
+            RelationModel.JoinTableInfo joinTable = relation.getJoinTable();
+            return "SELECT t.* FROM " + targetTable + " t"
+                    + " JOIN " + joinTable.getTableName() + " j ON j." + joinTable.getInverseJoinColumn() + " = t." + targetId
+                    + " WHERE j." + joinTable.getJoinColumn() + " = ?";
+        }
+
+        RelationModel owning = targetRepo.owningRelationByField(relation.getMappedBy());
+        RelationModel.JoinTableInfo joinTable = owning.getJoinTable();
+        return "SELECT t.* FROM " + targetTable + " t"
+                + " JOIN " + joinTable.getTableName() + " j ON j." + joinTable.getJoinColumn() + " = t." + targetId
+                + " WHERE j." + joinTable.getInverseJoinColumn() + " = ?";
     }
 
     // ------------------------------------------------------------------ helpers
@@ -450,8 +455,7 @@ public final class JdbcRepository<T> implements Repository<T> {
         return repo != null ? repo : newRepository(type, dataSource, dialect, registry);
     }
 
-    private static <X> JdbcRepository<X> newRepository(Class<X> type, DataSource dataSource, Dialect dialect,
-                                                       Map<Class<?>, JdbcRepository<?>> registry) {
+    private static <X> JdbcRepository<X> newRepository(Class<X> type, DataSource dataSource, Dialect dialect, Map<Class<?>, JdbcRepository<?>> registry) {
         return new JdbcRepository<>(type, dataSource, dialect, registry);
     }
 

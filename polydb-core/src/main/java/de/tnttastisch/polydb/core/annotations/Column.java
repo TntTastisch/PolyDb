@@ -47,4 +47,26 @@ public @interface Column {
      */
     int scale() default 0;
 
+    /**
+     * Explicit default value for the column, emitted verbatim as a SQL literal in the generated
+     * {@code DEFAULT} clause. This <em>overrides</em> any value derived from the field initialiser.
+     *
+     * <p>When left empty ({@code ""}, the default), the {@code DEFAULT} clause is instead derived
+     * automatically from the field's initialised value on a freshly constructed instance &ndash; for
+     * example {@code private boolean notify = false} yields {@code DEFAULT false} and
+     * {@code private String role = "user"} yields {@code DEFAULT 'user'}. Fields left at {@code null}
+     * (and types with no obvious literal form, such as {@code UUID}/dates/collections) get no
+     * {@code DEFAULT} clause; use this attribute to supply one for them.</p>
+     *
+     * <p>Set it explicitly when the literal differs from the field value or needs dialect-specific
+     * syntax: use {@code "false"}/{@code "0"} for booleans/numbers, {@code "'active'"} (with the inner
+     * quotes) for strings, and expressions such as {@code "CURRENT_TIMESTAMP"} for functions. The
+     * string is inserted as-is, so it must be a valid SQL literal for the target dialect.</p>
+     *
+     * <p>Having a default &ndash; derived or explicit &ndash; is what makes it safe to add a
+     * {@code NOT NULL} column to a table that already holds rows: the database backfills the existing
+     * rows with it instead of rejecting the {@code ALTER} for containing nulls.</p>
+     */
+    String defaultValue() default "";
+
 }

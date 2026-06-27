@@ -114,7 +114,10 @@ public class PolyDB implements AutoCloseable {
     private void closeDataSource() {
         if (dataSource instanceof HikariDataSource hikari) {
             hikari.close();
-        } else if (dataSource instanceof AutoCloseable closeable) {
+            return;
+        }
+
+        if (dataSource instanceof AutoCloseable closeable) {
             try {
                 closeable.close();
             } catch (Exception e) {
