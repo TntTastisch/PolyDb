@@ -93,6 +93,24 @@ public abstract class AbstractSqlDialect implements Dialect {
     }
 
     /**
+     * Renders a fixed-point decimal type ({@code BigDecimal}/{@code BigInteger}) using the column's
+     * declared {@link FieldModel#getPrecision() precision} and {@link FieldModel#getScale() scale}.
+     * When no precision is declared ({@code 0}) the bare {@code keyword} is returned so the backend
+     * applies its own default precision and scale.
+     *
+     * @param keyword the vendor's fixed-point type keyword (e.g. {@code DECIMAL}, {@code NUMERIC},
+     *                {@code NUMBER})
+     * @param field   the column whose precision/scale parameterise the type
+     */
+    protected String decimalType(String keyword, FieldModel field) {
+        if (field.getPrecision() <= 0) {
+            return keyword;
+        }
+        int scale = Math.max(field.getScale(), 0);
+        return keyword + "(" + field.getPrecision() + ", " + scale + ")";
+    }
+
+    /**
      * Renders the {@code DEFAULT} clause for a column, or an empty string when it declares no
      * default. The value is emitted verbatim (see
      * {@link de.tnttastisch.polydb.core.annotations.Column#defaultValue()}); supplying one is what

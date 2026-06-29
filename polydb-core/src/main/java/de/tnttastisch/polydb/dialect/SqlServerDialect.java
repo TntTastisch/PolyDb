@@ -21,18 +21,25 @@ public class SqlServerDialect extends AbstractSqlDialect {
 
     @Override
     public String getSqlType(FieldModel field) {
-        String typeName = field.getType().getSimpleName();
+        // Enums are stored by name in a string column.
+        String typeName = field.getType().isEnum() ? "String" : field.getType().getSimpleName();
         return switch (typeName) {
             case "String" -> "NVARCHAR(" + (field.getLength() > 4000 ? "MAX" : field.getLength()) + ")";
             case "int", "Integer" -> "INT";
             case "long", "Long" -> "BIGINT";
+            case "short", "Short" -> "SMALLINT";
+            case "byte", "Byte" -> "TINYINT";
             case "boolean", "Boolean" -> "BIT";
             case "double", "Double" -> "FLOAT";
             case "float", "Float" -> "REAL";
-            case "LocalDateTime", "Timestamp" -> "DATETIME2";
+            case "BigDecimal", "BigInteger" -> decimalType("DECIMAL", field);
+            case "char", "Character" -> "NCHAR(1)";
+            case "LocalDateTime", "Timestamp", "Instant" -> "DATETIME2";
             case "LocalDate" -> "DATE";
-            case "OffsetDateTime" -> "DATETIMEOFFSET";
+            case "LocalTime", "Time" -> "TIME";
+            case "OffsetDateTime", "ZonedDateTime" -> "DATETIMEOFFSET";
             case "UUID" -> "UNIQUEIDENTIFIER";
+            case "byte[]" -> "VARBINARY(MAX)";
             default -> "VARBINARY(MAX)";
         };
     }

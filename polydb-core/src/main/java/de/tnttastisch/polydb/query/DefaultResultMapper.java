@@ -6,6 +6,7 @@ import de.tnttastisch.polydb.schema.parser.EntityParser;
 
 import java.lang.reflect.Field;
 import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.*;
@@ -81,14 +82,21 @@ public class DefaultResultMapper<T> implements ResultMapper<T> {
      * {@code java.sql.Timestamp}/{@code Date}, widened numerics, or {@code String}/{@code UUID}
      * depending on the column type; this normalises the common cases.
      */
+    @SuppressWarnings({"unchecked", "rawtypes"})
     private Object coerce(Object value, Class<?> target) {
         if (value == null || target.isInstance(value)) {
             return value;
         }
 
+        // Enums are persisted by name (see JdbcRepository#valueForColumn); resolve back via valueOf.
+        if (target.isEnum() && value instanceof String enumName) {
+            return Enum.valueOf((Class<? extends Enum>) target, enumName);
+        }
+
         if (value instanceof java.sql.Timestamp ts) {
             if (target == LocalDateTime.class) return ts.toLocalDateTime();
             if (target == OffsetDateTime.class) return ts.toInstant().atOffset(ZoneOffset.UTC);
+            if (target == ZonedDateTime.class) return ts.toInstant().atZone(ZoneOffset.UTC);
             if (target == Instant.class) return ts.toInstant();
             if (target == LocalDate.class) return ts.toLocalDateTime().toLocalDate();
         }
@@ -112,11 +120,16 @@ public class DefaultResultMapper<T> implements ResultMapper<T> {
                 // through double (which only has a 53-bit mantissa).
                 return number instanceof BigDecimal bd ? bd : new BigDecimal(number.toString());
             }
+            if (target == BigInteger.class) {
+                // Route through BigDecimal so a fractional driver value (e.g. 42.0) parses cleanly.
+                return number instanceof BigInteger bi ? bi : new BigDecimal(number.toString()).toBigInteger();
+            }
         }
 
         if (value instanceof String string) {
             if (target == UUID.class) return UUID.fromString(string);
             if (target == Boolean.class || target == boolean.class) return Boolean.parseBoolean(string);
+            if ((target == Character.class || target == char.class) && !string.isEmpty()) return string.charAt(0);
         }
 
         if (target == String.class) {

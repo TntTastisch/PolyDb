@@ -20,18 +20,25 @@ public class PostgreSqlDialect extends AbstractSqlDialect {
 
     @Override
     public String getSqlType(FieldModel field) {
-        String typeName = field.getType().getSimpleName();
+        // Enums are stored by name in a string column.
+        String typeName = field.getType().isEnum() ? "String" : field.getType().getSimpleName();
         return switch (typeName) {
             case "String" -> "VARCHAR(" + field.getLength() + ")";
             case "int", "Integer" -> field.isAutoIncrement() ? "SERIAL" : "INTEGER";
             case "long", "Long" -> field.isAutoIncrement() ? "BIGSERIAL" : "BIGINT";
+            case "short", "Short" -> field.isAutoIncrement() ? "SMALLSERIAL" : "SMALLINT";
+            case "byte", "Byte" -> "SMALLINT";
             case "boolean", "Boolean" -> "BOOLEAN";
             case "double", "Double" -> "DOUBLE PRECISION";
             case "float", "Float" -> "REAL";
-            case "LocalDateTime", "Timestamp" -> "TIMESTAMP";
+            case "BigDecimal", "BigInteger" -> decimalType("NUMERIC", field);
+            case "char", "Character" -> "CHAR(1)";
+            case "LocalDateTime", "Timestamp", "Instant" -> "TIMESTAMP";
             case "LocalDate" -> "DATE";
-            case "OffsetDateTime" -> "TIMESTAMPTZ";
+            case "LocalTime", "Time" -> "TIME";
+            case "OffsetDateTime", "ZonedDateTime" -> "TIMESTAMPTZ";
             case "UUID" -> "UUID";
+            case "byte[]" -> "BYTEA";
             default -> "TEXT";
         };
     }

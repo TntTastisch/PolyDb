@@ -25,17 +25,25 @@ public class CassandraDialect implements Dialect {
 
     @Override
     public String getSqlType(FieldModel field) {
-        String typeName = field.getType().getSimpleName();
+        // Enums are stored by name in a text column.
+        String typeName = field.getType().isEnum() ? "String" : field.getType().getSimpleName();
         return switch (typeName) {
             case "String" -> "text";
             case "int", "Integer" -> "int";
             case "long", "Long" -> "bigint";
+            case "short", "Short" -> "smallint";
+            case "byte", "Byte" -> "tinyint";
             case "boolean", "Boolean" -> "boolean";
             case "double", "Double" -> "double";
             case "float", "Float" -> "float";
-            case "Timestamp", "LocalDateTime", "OffsetDateTime" -> "TIMESTAMP";
+            case "BigDecimal" -> "decimal";
+            case "BigInteger" -> "varint";
+            case "char", "Character" -> "text";
+            case "Timestamp", "LocalDateTime", "OffsetDateTime", "ZonedDateTime", "Instant" -> "TIMESTAMP";
             case "LocalDate" -> "date";
+            case "LocalTime", "Time" -> "time";
             case "UUID" -> "uuid";
+            case "byte[]" -> "blob";
             default -> "blob";
         };
     }

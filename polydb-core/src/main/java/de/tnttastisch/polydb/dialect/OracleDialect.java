@@ -21,18 +21,25 @@ public class OracleDialect extends AbstractSqlDialect {
 
     @Override
     public String getSqlType(FieldModel field) {
-        String typeName = field.getType().getSimpleName();
+        // Enums are stored by name in a string column.
+        String typeName = field.getType().isEnum() ? "String" : field.getType().getSimpleName();
         return switch (typeName) {
             case "String" -> "VARCHAR2(" + field.getLength() + ")";
             case "int", "Integer" -> "NUMBER(10)";
             case "long", "Long" -> "NUMBER(19)";
+            case "short", "Short" -> "NUMBER(5)";
+            case "byte", "Byte" -> "NUMBER(3)";
             case "boolean", "Boolean" -> "NUMBER(1)";
             case "double", "Double" -> "FLOAT(126)";
             case "float", "Float" -> "FLOAT(63)";
-            case "LocalDateTime", "Timestamp" -> "TIMESTAMP";
+            case "BigDecimal", "BigInteger" -> decimalType("NUMBER", field);
+            case "char", "Character" -> "CHAR(1)";
+            // Oracle has no standalone TIME type; a time-of-day maps onto TIMESTAMP.
+            case "LocalDateTime", "Timestamp", "Instant", "LocalTime", "Time" -> "TIMESTAMP";
             case "LocalDate" -> "DATE";
             case "UUID" -> "RAW(16)";
-            case "OffsetDateTime" -> "TIMESTAMP WITH TIME ZONE";
+            case "OffsetDateTime", "ZonedDateTime" -> "TIMESTAMP WITH TIME ZONE";
+            case "byte[]" -> "BLOB";
             default -> "BLOB";
         };
     }

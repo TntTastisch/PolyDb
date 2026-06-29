@@ -11,11 +11,15 @@ public class SqliteDialect extends AbstractSqlDialect {
 
     @Override
     public String getSqlType(FieldModel field) {
-        String typeName = field.getType().getSimpleName();
+        // Enums are stored by name in a string column.
+        String typeName = field.getType().isEnum() ? "String" : field.getType().getSimpleName();
         return switch (typeName) {
-            case "String", "UUID", "OffsetDateTime", "LocalDateTime", "Timestamp", "LocalDate" -> "TEXT";
-            case "int", "Integer", "long", "Long", "boolean", "Boolean" -> "INTEGER";
+            case "String", "UUID", "OffsetDateTime", "ZonedDateTime", "LocalDateTime", "Timestamp",
+                 "Instant", "LocalDate", "LocalTime", "Time", "char", "Character" -> "TEXT";
+            case "int", "Integer", "long", "Long", "short", "Short", "byte", "Byte",
+                 "boolean", "Boolean" -> "INTEGER";
             case "double", "Double", "float", "Float" -> "REAL";
+            case "BigDecimal", "BigInteger" -> "NUMERIC";
             default -> "BLOB";
         };
     }

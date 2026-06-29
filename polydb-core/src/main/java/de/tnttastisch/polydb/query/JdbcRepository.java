@@ -178,7 +178,10 @@ public final class JdbcRepository<T> implements Repository<T> {
      */
     private Object valueForColumn(Object entity, FieldModel field) {
         if (!field.isForeignKey()) {
-            return getValue(entity, field);
+            Object value = getValue(entity, field);
+            // Enums map to a string column (see the dialects' getSqlType), so bind their name rather
+            // than the enum object, which JDBC drivers cannot handle directly.
+            return value instanceof Enum<?> e ? e.name() : value;
         }
         RelationModel relation = field.getRelation();
         Object associated = getValue(entity, relation.getField());

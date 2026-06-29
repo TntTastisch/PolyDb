@@ -27,15 +27,19 @@ public class MongoDialect implements Dialect {
 
     @Override
     public String getSqlType(FieldModel field) {
-        String typeName = field.getType().getSimpleName();
+        // Enums are stored by name in a string field.
+        String typeName = field.getType().isEnum() ? "String" : field.getType().getSimpleName();
         return switch (typeName) {
-            case "String", "OffsetDateTime", "Timestamp" -> "string";
-            case "int", "Integer" -> "int";
+            case "String", "OffsetDateTime", "ZonedDateTime", "Timestamp", "char", "Character",
+                 "LocalTime", "Time" -> "string";
+            case "int", "Integer", "short", "Short", "byte", "Byte" -> "int";
             case "long", "Long" -> "long";
             case "boolean", "Boolean" -> "bool";
             case "double", "Double", "float", "Float" -> "double";
-            case "LocalDateTime", "LocalDate" -> "date";
+            case "BigDecimal", "BigInteger" -> "decimal";
+            case "LocalDateTime", "LocalDate", "Instant" -> "date";
             case "UUID" -> "uuid";
+            case "byte[]" -> "binData";
             default -> "binData";
         };
     }

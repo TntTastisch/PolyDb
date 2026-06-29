@@ -19,17 +19,22 @@ public class FirebirdDialect extends AbstractSqlDialect {
 
     @Override
     public String getSqlType(FieldModel field) {
-        String typeName = field.getType().getSimpleName();
+        // Enums are stored by name in a string column.
+        String typeName = field.getType().isEnum() ? "String" : field.getType().getSimpleName();
         return switch (typeName) {
             case "String" -> "VARCHAR(" + field.getLength() + ")";
             case "int", "Integer" -> "INTEGER";
             case "long", "Long" -> "BIGINT";
+            case "short", "Short", "byte", "Byte" -> "SMALLINT";
             case "boolean", "Boolean" -> "BOOLEAN";
             case "double", "Double" -> "DOUBLE PRECISION";
             case "float", "Float" -> "FLOAT";
-            case "LocalDateTime", "Timestamp" -> "TIMESTAMP";
+            case "BigDecimal", "BigInteger" -> decimalType("DECIMAL", field);
+            case "char", "Character" -> "CHAR(1)";
+            case "LocalDateTime", "Timestamp", "Instant" -> "TIMESTAMP";
             case "LocalDate" -> "DATE";
-            case "OffsetDateTime" -> "TIMESTAMP WITH TIME ZONE";
+            case "LocalTime", "Time" -> "TIME";
+            case "OffsetDateTime", "ZonedDateTime" -> "TIMESTAMP WITH TIME ZONE";
             default -> "BLOB SUB_TYPE 0";
         };
     }

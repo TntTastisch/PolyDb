@@ -32,17 +32,24 @@ public class MySqlDialect extends AbstractSqlDialect {
 
     @Override
     public String getSqlType(FieldModel field) {
-        String typeName = field.getType().getSimpleName();
+        // Enums are stored by name in a string column.
+        String typeName = field.getType().isEnum() ? "String" : field.getType().getSimpleName();
         return switch (typeName) {
             case "String" -> "VARCHAR(" + field.getLength() + ")";
             case "int", "Integer" -> "INT";
             case "long", "Long" -> "BIGINT";
+            case "short", "Short" -> "SMALLINT";
+            case "byte", "Byte" -> "TINYINT";
             case "boolean", "Boolean" -> "TINYINT(1)";
             case "double", "Double" -> "DOUBLE";
             case "float", "Float" -> "FLOAT";
-            case "LocalDateTime", "Timestamp" -> "DATETIME";
-            case "OffsetDateTime" -> "DATETIME(6)";
+            case "BigDecimal", "BigInteger" -> decimalType("DECIMAL", field);
+            case "char", "Character" -> "CHAR(1)";
+            case "LocalDateTime", "Timestamp", "Instant" -> "DATETIME";
+            case "OffsetDateTime", "ZonedDateTime" -> "DATETIME(6)";
             case "LocalDate" -> "DATE";
+            case "LocalTime", "Time" -> "TIME";
+            case "byte[]" -> "BLOB";
             default -> "VARCHAR(255)";
         };
     }
