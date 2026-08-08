@@ -30,7 +30,7 @@ import java.util.stream.Collectors;
  * @param <T>  the entity type this repository manages
  * @param <ID> the type of the entity's {@code @Id} field
  */
-public final class JdbcRepository<T, ID> implements CrudRepository<T, ID> {
+public final class JdbcRepository<T, ID> implements PagingAndSortingRepository<T, ID> {
 
     /** Eager relations are resolved this many levels deep from the root entity. */
     private static final int DEFAULT_DEPTH = 1;
@@ -128,6 +128,33 @@ public final class JdbcRepository<T, ID> implements CrudRepository<T, ID> {
     @Override
     public long count() {
         return countWhere(null);
+    }
+
+    @Override
+    public List<T> findAll(Sort sort) {
+        return findWhere(null, toOrders(sort), null, null);
+    }
+
+    @Override
+    public Page<T> findAll(Pageable pageable) {
+        List<Order> orders = toOrders(pageable.getSort());
+        if (orders.isEmpty()) {
+            // A deterministic order is required for stable paging (and for dialects whose OFFSET/FETCH
+            // form mandates ORDER BY), so fall back to the primary key.
+            orders = List.of(Order.asc(idField.getColumnName()));
+        }
+        List<T> content = findWhere(null, orders, (long) pageable.getPageSize(), pageable.getOffset());
+        return new PageImpl<>(content, pageable, countWhere(null));
+    }
+
+    /** Resolves a {@link Sort} over entity properties into ordering terms over the mapped columns. */
+    private List<Order> toOrders(Sort sort) {
+        List<Order> orders = new ArrayList<>();
+        for (Sort.Order order : sort.getOrders()) {
+            FieldModel field = resolveProperty(order.getProperty());
+            orders.add(new Order(field.getColumnName(), order.getDirection(), order.isIgnoreCase()));
+        }
+        return orders;
     }
 
     @Override
@@ -237,6 +264,11 @@ public final class JdbcRepository<T, ID> implements CrudRepository<T, ID> {
     /** The entity type this repository manages. */
     public Class<T> getEntityClass() {
         return entityClass;
+    }
+
+    /** The primary-key column name, used as the default ordering for stable pagination. */
+    public String getIdColumnName() {
+        return idField.getColumnName();
     }
 
     /**

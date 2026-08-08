@@ -2,6 +2,12 @@ package de.tnttastisch.polydb.query.support;
 
 import de.tnttastisch.polydb.core.exception.PolyDBException;
 import de.tnttastisch.polydb.query.JdbcRepository;
+import de.tnttastisch.polydb.query.Page;
+import de.tnttastisch.polydb.query.PageImpl;
+import de.tnttastisch.polydb.query.Pageable;
+import de.tnttastisch.polydb.query.Slice;
+import de.tnttastisch.polydb.query.SliceImpl;
+import de.tnttastisch.polydb.query.Sort;
 import de.tnttastisch.polydb.query.sql.Condition;
 import de.tnttastisch.polydb.query.sql.Order;
 import de.tnttastisch.polydb.schema.model.FieldModel;
@@ -42,13 +48,27 @@ public final class DerivedQueryExecutor implements QueryMethodExecutor {
 
         int[] cursor = {0};
         Condition condition = buildCondition(method, query, arguments, cursor);
+
+        // An optional trailing Pageable or Sort argument follows the predicate arguments.
+        Pageable pageable = null;
+        Sort sort = null;
+        if (cursor[0] < arguments.length) {
+            Object tail = arguments[cursor[0]];
+            if (tail instanceof Pageable p) {
+                pageable = p;
+                cursor[0]++;
+            } else if (tail instanceof Sort s) {
+                sort = s;
+                cursor[0]++;
+            }
+        }
         if (cursor[0] != arguments.length) {
             throw new PolyDBException("Query method " + method.getName() + " binds " + cursor[0]
                     + " argument(s) but was called with " + arguments.length);
         }
 
         return switch (query.getAction()) {
-            case FIND -> executeFind(method, query, condition);
+            case FIND -> executeFind(method, query, condition, sort, pageable);
             case COUNT -> toNumber(repository.countWhere(condition), method.getReturnType());
             case EXISTS -> repository.existsWhere(condition);
             case DELETE -> executeDelete(method, condition);
@@ -104,11 +124,19 @@ public final class DerivedQueryExecutor implements QueryMethodExecutor {
         };
     }
 
-    private Object executeFind(Method method, DerivedQuery query, Condition condition) {
-        List<Order> orders = toOrders(query.getOrderItems());
-        Long limit = query.getLimit() == null ? null : query.getLimit().longValue();
+    private Object executeFind(Method method, DerivedQuery query, Condition condition, Sort sort, Pageable pageable) {
+        List<Order> orders = orderItemsToOrders(query.getOrderItems());
+        Sort extraSort = pageable != null ? pageable.getSort() : sort;
+        if (extraSort != null) {
+            orders.addAll(sortToOrders(extraSort));
+        }
         Class<?> returnType = method.getReturnType();
 
+        if (pageable != null) {
+            return executePaged(method, condition, orders, pageable, returnType);
+        }
+
+        Long limit = query.getLimit() == null ? null : query.getLimit().longValue();
         if (Optional.class.equals(returnType)) {
             List<?> result = repository.findWhere(condition, orders, 1L, null);
             return result.isEmpty() ? Optional.empty() : Optional.of(result.get(0));
@@ -123,6 +151,31 @@ public final class DerivedQueryExecutor implements QueryMethodExecutor {
         throw new PolyDBException("Unsupported return type for query method " + method.getName() + ": " + returnType);
     }
 
+    private Object executePaged(Method method, Condition condition, List<Order> orders, Pageable pageable, Class<?> returnType) {
+        // Paging needs a deterministic order; fall back to the primary key when none was requested.
+        List<Order> effective = orders.isEmpty()
+                ? new ArrayList<>(List.of(Order.asc(repository.getIdColumnName())))
+                : orders;
+        long pageSize = pageable.getPageSize();
+        long offset = pageable.getOffset();
+
+        if (Page.class.isAssignableFrom(returnType)) {
+            List<?> content = repository.findWhere(condition, effective, pageSize, offset);
+            return new PageImpl<>(content, pageable, repository.countWhere(condition));
+        }
+        if (Slice.class.isAssignableFrom(returnType)) {
+            // Fetch one extra row to learn whether a further slice exists, sparing the COUNT query.
+            List<?> rows = repository.findWhere(condition, effective, pageSize + 1, offset);
+            boolean hasNext = rows.size() > pageable.getPageSize();
+            List<?> content = hasNext ? rows.subList(0, pageable.getPageSize()) : rows;
+            return new SliceImpl<>(content, pageable, hasNext);
+        }
+        if (Iterable.class.isAssignableFrom(returnType)) {
+            return repository.findWhere(condition, effective, pageSize, offset);
+        }
+        throw new PolyDBException("Unsupported paged return type for query method " + method.getName() + ": " + returnType);
+    }
+
     private Object executeDelete(Method method, Condition condition) {
         long deleted = repository.deleteWhere(condition);
         Class<?> returnType = method.getReturnType();
@@ -132,10 +185,19 @@ public final class DerivedQueryExecutor implements QueryMethodExecutor {
         return toNumber(deleted, returnType);
     }
 
-    private List<Order> toOrders(List<DerivedQuery.OrderItem> orderItems) {
+    private List<Order> orderItemsToOrders(List<DerivedQuery.OrderItem> orderItems) {
         List<Order> orders = new ArrayList<>();
         for (DerivedQuery.OrderItem item : orderItems) {
             orders.add(new Order(repository.resolveProperty(item.property()).getColumnName(), item.direction()));
+        }
+        return orders;
+    }
+
+    private List<Order> sortToOrders(Sort sort) {
+        List<Order> orders = new ArrayList<>();
+        for (Sort.Order order : sort.getOrders()) {
+            FieldModel field = repository.resolveProperty(order.getProperty());
+            orders.add(new Order(field.getColumnName(), order.getDirection(), order.isIgnoreCase()));
         }
         return orders;
     }

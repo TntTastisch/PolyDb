@@ -52,4 +52,18 @@ public class FirebirdDialect extends AbstractSqlDialect {
     public String getModifyColumnSql(String tableName, FieldModel field) {
         return "ALTER TABLE " + tableName + " ALTER COLUMN " + field.getColumnName() + " TYPE " + getSqlType(field);
     }
+
+    /** Firebird (3+) pages with the ANSI {@code OFFSET ... FETCH} form rather than {@code LIMIT}. */
+    @Override
+    public String getLimitClause(Long limit, Long offset) {
+        if (limit == null && offset == null) {
+            return "";
+        }
+        long skip = offset == null ? 0 : offset;
+        StringBuilder clause = new StringBuilder("OFFSET ").append(skip).append(" ROWS");
+        if (limit != null) {
+            clause.append(" FETCH NEXT ").append(limit).append(" ROWS ONLY");
+        }
+        return clause.toString();
+    }
 }

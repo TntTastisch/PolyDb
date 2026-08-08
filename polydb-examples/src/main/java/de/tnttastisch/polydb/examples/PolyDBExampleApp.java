@@ -5,10 +5,12 @@ import de.tnttastisch.polydb.examples.entity.Post;
 import de.tnttastisch.polydb.examples.entity.User;
 import de.tnttastisch.polydb.examples.repository.UserRepository;
 import de.tnttastisch.polydb.query.CrudRepository;
+import de.tnttastisch.polydb.query.Sort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -63,16 +65,20 @@ public class PolyDBExampleApp {
             log.info("findByUsernameContainingIgnoreCase('tnt') -> {} match(es)",
                     userRepository.findByUsernameContainingIgnoreCase("tnt").size());
 
-            // 7. Read all users back from the database.
+            // 7. Sorting and pagination come for free with PagingAndSortingRepository.
+            List<User> byName = userRepository.findAll(Sort.by("username"));
+            log.info("findAll(Sort by username) -> {}", byName.stream().map(User::getUsername).toList());
+
+            // 8. Read all users back from the database.
             for (User u : userRepository.findAll()) {
                 log.info("Found user: {} ({})", u.getUsername(), u.getEmail());
             }
 
-            // 8. Read all posts. The @ManyToOne author is eagerly loaded, so getAuthor() is populated
+            // 9. Read all posts. The @ManyToOne author is eagerly loaded, so getAuthor() is populated
             //    without an extra query in the application code.
             for (Post post : postRepository.findAll()) {
                 log.info("Post '{}' by {}", post.getTitle(), post.getAuthor().getUsername());
             }
-        } // 9. close() is invoked automatically by try-with-resources, shutting PolyDB down cleanly.
+        } // 10. close() is invoked automatically by try-with-resources, shutting PolyDB down cleanly.
     }
 }
