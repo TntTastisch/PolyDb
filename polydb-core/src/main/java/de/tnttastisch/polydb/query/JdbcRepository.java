@@ -387,6 +387,25 @@ public final class JdbcRepository<T, ID> implements PagingAndSortingRepository<T
     }
 
     /**
+     * Runs a raw SQL {@code SELECT} and returns each row as a column-label &rarr; value map (insertion
+     * ordered). Used to map {@code @Query} results onto interface/record projections by column label.
+     *
+     * @param sql    the SQL, with {@code ?} placeholders
+     * @param params the positional bind values
+     * @return the rows, each as an ordered map keyed by column label
+     */
+    public List<Map<String, Object>> queryRows(String sql, List<Object> params) {
+        return executor.executeQuery(sql, params, rs -> {
+            var meta = rs.getMetaData();
+            Map<String, Object> row = new LinkedHashMap<>();
+            for (int i = 1; i <= meta.getColumnCount(); i++) {
+                row.put(meta.getColumnLabel(i), rs.getObject(i));
+            }
+            return row;
+        });
+    }
+
+    /**
      * Runs a raw {@code INSERT}/{@code UPDATE}/{@code DELETE}. Backs {@code @Modifying @Query} methods.
      *
      * @param sql    the SQL, with {@code ?} placeholders

@@ -14,6 +14,8 @@ import de.tnttastisch.polydb.schema.model.FieldModel;
 
 import java.lang.reflect.Array;
 import java.lang.reflect.Method;
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -140,25 +142,28 @@ public final class DerivedQueryExecutor implements QueryMethodExecutor {
         Class<?> returnType = method.getReturnType();
 
         if (pageable != null) {
-            return executePaged(method, condition, orders, pageable, returnType);
+            return executePaged(method, condition, orders, pageable);
         }
 
         Long limit = query.getLimit() == null ? null : query.getLimit().longValue();
         if (Optional.class.equals(returnType)) {
             List<?> result = repository.findWhere(condition, orders, 1L, null);
-            return result.isEmpty() ? Optional.empty() : Optional.of(result.get(0));
+            return result.isEmpty() ? Optional.empty() : Optional.of(projectOne(elementType(method), result.get(0)));
         }
         if (Iterable.class.isAssignableFrom(returnType)) {
-            return repository.findWhere(condition, orders, limit, null);
+            return projectList(elementType(method), repository.findWhere(condition, orders, limit, null));
         }
-        if (returnType.isAssignableFrom(repository.getEntityClass())) {
+        if (returnType.isAssignableFrom(repository.getEntityClass())
+                || ProjectionSupport.isProjection(returnType, repository.getEntityClass())) {
             List<?> result = repository.findWhere(condition, orders, 1L, null);
-            return result.isEmpty() ? null : result.get(0);
+            return result.isEmpty() ? null : projectOne(returnType, result.get(0));
         }
         throw new PolyDBException("Unsupported return type for query method " + method.getName() + ": " + returnType);
     }
 
-    private Object executePaged(Method method, Condition condition, List<Order> orders, Pageable pageable, Class<?> returnType) {
+    private Object executePaged(Method method, Condition condition, List<Order> orders, Pageable pageable) {
+        Class<?> returnType = method.getReturnType();
+        Class<?> element = elementType(method);
         // Paging needs a deterministic order; fall back to the primary key when none was requested.
         List<Order> effective = orders.isEmpty()
                 ? new ArrayList<>(List.of(Order.asc(repository.getIdColumnName())))
@@ -168,19 +173,53 @@ public final class DerivedQueryExecutor implements QueryMethodExecutor {
 
         if (Page.class.isAssignableFrom(returnType)) {
             List<?> content = repository.findWhere(condition, effective, pageSize, offset);
-            return new PageImpl<>(content, pageable, repository.countWhere(condition));
+            return new PageImpl<>(projectList(element, content), pageable, repository.countWhere(condition));
         }
         if (Slice.class.isAssignableFrom(returnType)) {
             // Fetch one extra row to learn whether a further slice exists, sparing the COUNT query.
             List<?> rows = repository.findWhere(condition, effective, pageSize + 1, offset);
             boolean hasNext = rows.size() > pageable.getPageSize();
             List<?> content = hasNext ? rows.subList(0, pageable.getPageSize()) : rows;
-            return new SliceImpl<>(content, pageable, hasNext);
+            return new SliceImpl<>(projectList(element, content), pageable, hasNext);
         }
         if (Iterable.class.isAssignableFrom(returnType)) {
-            return repository.findWhere(condition, effective, pageSize, offset);
+            return projectList(element, repository.findWhere(condition, effective, pageSize, offset));
         }
         throw new PolyDBException("Unsupported paged return type for query method " + method.getName() + ": " + returnType);
+    }
+
+    /** Maps entities to projections when {@code element} is a projection type; otherwise returns them as-is. */
+    private List<?> projectList(Class<?> element, List<?> entities) {
+        if (!ProjectionSupport.isProjection(element, repository.getEntityClass())) {
+            return entities;
+        }
+        List<Object> projected = new ArrayList<>(entities.size());
+        for (Object entity : entities) {
+            projected.add(ProjectionSupport.project(element, ProjectionSupport.entityAccessor(entity)));
+        }
+        return projected;
+    }
+
+    private Object projectOne(Class<?> target, Object entity) {
+        if (!ProjectionSupport.isProjection(target, repository.getEntityClass())) {
+            return entity;
+        }
+        return ProjectionSupport.project(target, ProjectionSupport.entityAccessor(entity));
+    }
+
+    /** The element type of a parameterised return ({@code List<X>}/{@code Optional<X>}/{@code Page<X>}). */
+    private static Class<?> elementType(Method method) {
+        Type generic = method.getGenericReturnType();
+        if (generic instanceof ParameterizedType parameterized) {
+            Type argument = parameterized.getActualTypeArguments()[0];
+            if (argument instanceof Class<?> clazz) {
+                return clazz;
+            }
+            if (argument instanceof ParameterizedType nested) {
+                return (Class<?>) nested.getRawType();
+            }
+        }
+        return Object.class;
     }
 
     private Object executeDelete(Method method, Condition condition) {

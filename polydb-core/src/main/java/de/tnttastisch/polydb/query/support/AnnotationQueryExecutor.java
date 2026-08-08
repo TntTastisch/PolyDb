@@ -63,6 +63,10 @@ public final class AnnotationQueryExecutor implements QueryMethodExecutor {
                 List<?> rows = repository.query(sql, params);
                 return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
             }
+            if (isProjection(element)) {
+                List<Map<String, Object>> rows = repository.queryRows(sql, params);
+                return rows.isEmpty() ? Optional.empty() : Optional.of(projectRow(element, rows.get(0)));
+            }
             List<Object> column = repository.queryScalarColumn(sql, params);
             return column.isEmpty() ? Optional.empty() : Optional.ofNullable(coerceScalar(column.get(0), element));
         }
@@ -71,6 +75,13 @@ public final class AnnotationQueryExecutor implements QueryMethodExecutor {
             Class<?> element = genericArgument(method);
             if (isEntity(element)) {
                 return repository.query(sql, params);
+            }
+            if (isProjection(element)) {
+                List<Object> projected = new ArrayList<>();
+                for (Map<String, Object> row : repository.queryRows(sql, params)) {
+                    projected.add(projectRow(element, row));
+                }
+                return projected;
             }
             List<Object> converted = new ArrayList<>();
             for (Object value : repository.queryScalarColumn(sql, params)) {
@@ -83,6 +94,10 @@ public final class AnnotationQueryExecutor implements QueryMethodExecutor {
             List<?> rows = repository.query(sql, params);
             return rows.isEmpty() ? null : rows.get(0);
         }
+        if (isProjection(returnType)) {
+            List<Map<String, Object>> rows = repository.queryRows(sql, params);
+            return rows.isEmpty() ? null : projectRow(returnType, rows.get(0));
+        }
 
         // Scalar single value (e.g. long from COUNT).
         List<Object> column = repository.queryScalarColumn(sql, params);
@@ -91,6 +106,14 @@ public final class AnnotationQueryExecutor implements QueryMethodExecutor {
 
     private boolean isEntity(Class<?> type) {
         return repository.getEntityClass().equals(type);
+    }
+
+    private boolean isProjection(Class<?> type) {
+        return ProjectionSupport.isProjection(type, repository.getEntityClass());
+    }
+
+    private static Object projectRow(Class<?> type, Map<String, Object> row) {
+        return ProjectionSupport.project(type, ProjectionSupport.rowAccessor(row));
     }
 
     /** The element type of a parameterised return ({@code List<X>}/{@code Optional<X>}), or Object. */
