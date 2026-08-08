@@ -11,9 +11,7 @@ database tables.
 
 - Annotation-based entity mapping
 - Automatic schema generation
-- Spring Data&ndash;style repositories: interface-driven CRUD, derived query methods, `@Query`,
-  pagination &amp; sorting, specifications, projections, transactions, auditing, optimistic locking
-  and soft delete (see **[REPOSITORIES.md](REPOSITORIES.md)**)
+- Repository layer interface-driven CRUD, derived query methods, custom `@Query` methods, pagination & sorting, specifications, projections, transactions, auditing, optimistic locking, and soft delete.
 - Database dialect support
 - Declarative, versioned Java migrations with dry-run and history
 - Support for multiple databases
