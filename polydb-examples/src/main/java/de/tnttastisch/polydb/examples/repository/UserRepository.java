@@ -3,6 +3,8 @@ package de.tnttastisch.polydb.examples.repository;
 import de.tnttastisch.polydb.examples.entity.User;
 import de.tnttastisch.polydb.query.CrudRepository;
 
+import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -12,8 +14,17 @@ import java.util.UUID;
  * {@code polyDB.getRepository(UserRepository.class)}).
  *
  * <p>This is the type-safe counterpart to the quick {@code polyDB.repository(User.class)} path — the
- * id type is {@code UUID} here rather than {@code Object}. It is also the natural place to add custom
- * query methods (e.g. {@code findByUsername}) as those capabilities land.</p>
+ * id type is {@code UUID} here rather than {@code Object}. It also declares <em>derived query
+ * methods</em>: PolyDB reads the method names and generates the SQL, so no bodies are needed.</p>
  */
 public interface UserRepository extends CrudRepository<User, UUID> {
+
+    /** Looks up a single user by exact username. */
+    Optional<User> findByUsername(String username);
+
+    /** Case-insensitive substring search over usernames. */
+    List<User> findByUsernameContainingIgnoreCase(String part);
+
+    /** Counts how many users carry the given email. */
+    long countByEmail(String email);
 }

@@ -9,7 +9,6 @@ import org.junit.jupiter.api.Test;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * End-to-end coverage of the dynamic-proxy repository path ({@code PolyDB.getRepository(...)}): a
@@ -58,12 +57,13 @@ class RepositoryProxyTest {
     }
 
     @Test
-    void unsupportedQueryMethodThrows() {
+    void derivedQueryMethodRunsThroughProxy() {
         try (PolyDB db = start()) {
             WidgetRepository widgets = db.getRepository(WidgetRepository.class);
-            assertThatThrownBy(() -> widgets.findByName("x"))
-                    .isInstanceOf(UnsupportedOperationException.class)
-                    .hasMessageContaining("findByName");
+            widgets.save(widget("match"));
+            widgets.save(widget("other"));
+
+            assertThat(widgets.findByName("match")).extracting(Widget::getName).containsExactly("match");
         }
     }
 

@@ -163,15 +163,25 @@ public final class JdbcRepository<T, ID> implements CrudRepository<T, ID> {
         }
     }
 
-    // ------------------------------------------------------------------ query primitives
+    // ------------------------------------------------------------------ query primitives (SPI)
+
+    // These low-level primitives take a Condition tree and are the substrate the higher repository
+    // layers build on (derived query methods, specifications). They are public so the query-method
+    // infrastructure in the support package can reach them, but they are not part of the
+    // CrudRepository interface, so an application obtaining a repository sees only the CRUD surface.
 
     /**
      * Core read primitive: selects entities matching {@code where} (all rows when {@code null}),
-     * ordered and paged as requested, and resolves eager relations one level deep. Shared by the CRUD
-     * reads and, later, by derived query methods and specifications.
+     * ordered and paged as requested, and resolves eager relations one level deep.
+     *
+     * @param where  the predicate, or {@code null} to match all rows
+     * @param orders the ordering terms, or {@code null} for none
+     * @param limit  the maximum number of rows, or {@code null} for no cap
+     * @param offset the number of leading rows to skip, or {@code null} for none
+     * @return the matching entities
      */
     @SuppressWarnings("unchecked")
-    private List<T> findWhere(Condition where, List<Order> orders, Long limit, Long offset) {
+    public List<T> findWhere(Condition where, List<Order> orders, Long limit, Long offset) {
         SqlBuilder builder = SqlBuilder.from(model.getTableName())
                 .where(where)
                 .orderBy(orders)
@@ -180,16 +190,97 @@ public final class JdbcRepository<T, ID> implements CrudRepository<T, ID> {
         return (List<T>) (List<?>) queryObjects(builder.toSelectSql(dialect), builder.parameters(), DEFAULT_DEPTH);
     }
 
-    /** Counts rows matching {@code where} (all rows when {@code null}). */
-    private long countWhere(Condition where) {
+    /**
+     * Counts rows matching {@code where} (all rows when {@code null}).
+     *
+     * @param where the predicate, or {@code null} to count all rows
+     * @return the number of matching rows
+     */
+    public long countWhere(Condition where) {
         SqlBuilder builder = SqlBuilder.from(model.getTableName()).where(where);
         List<Long> result = executor.executeQuery(builder.toCountSql(), builder.parameters(), rs -> rs.getLong(1));
         return result.isEmpty() ? 0L : result.get(0);
     }
 
-    /** Whether any row matches {@code where}. */
-    private boolean existsWhere(Condition where) {
+    /**
+     * Whether any row matches {@code where}.
+     *
+     * @param where the predicate, or {@code null} to test for any row at all
+     * @return {@code true} if at least one row matches
+     */
+    public boolean existsWhere(Condition where) {
         return countWhere(where) > 0;
+    }
+
+    /**
+     * Deletes every row matching {@code where}, row by row so relation cascades fire (matching the
+     * semantics of {@link #deleteById}). Rows are loaded without their relations (only the id drives
+     * the delete).
+     *
+     * @param where the predicate selecting the rows to delete, or {@code null} for all rows
+     * @return the number of rows deleted
+     */
+    public long deleteWhere(Condition where) {
+        SqlBuilder builder = SqlBuilder.from(model.getTableName()).where(where);
+        List<Object> matches = queryObjects(builder.toSelectSql(dialect), builder.parameters(), 0);
+        for (Object entity : matches) {
+            deleteByIdValue(getValue(entity, idField));
+        }
+        return matches.size();
+    }
+
+    /** The parsed, dialect-independent model describing this repository's entity. */
+    public EntityModel getModel() {
+        return model;
+    }
+
+    /** The entity type this repository manages. */
+    public Class<T> getEntityClass() {
+        return entityClass;
+    }
+
+    /**
+     * Resolves an entity property name (as used in a derived query method, case-insensitive) to its
+     * {@link FieldModel} — a scalar column or an owning foreign-key column.
+     *
+     * @param propertyName the Java property/field name
+     * @return the matching field model
+     * @throws PolyDBException if no persistent property with that name exists
+     */
+    public FieldModel resolveProperty(String propertyName) {
+        for (FieldModel field : model.getFields()) {
+            if (field.getField().getName().equalsIgnoreCase(propertyName)) {
+                return field;
+            }
+        }
+        String known = model.getFields().stream().map(f -> f.getField().getName()).collect(Collectors.joining(", "));
+        throw new PolyDBException("No persistent property '" + propertyName + "' on " + entityClass.getName()
+                + " (known properties: " + known + ")");
+    }
+
+    /**
+     * Converts a value bound against {@code field} in a query predicate to the form the column stores:
+     * enums bind by name, foreign-key fields bind the referenced id (accepting either the associated
+     * entity or the id itself), everything else passes through.
+     *
+     * @param field the target column
+     * @param value the raw argument value
+     * @return the value to bind
+     */
+    public Object toColumnValue(FieldModel field, Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (field.isForeignKey()) {
+            RelationModel relation = field.getRelation();
+            if (relation.getTargetEntity().isInstance(value)) {
+                JdbcRepository<?, ?> targetRepo = repoFor(relation.getTargetEntity());
+                FieldModel referenced = targetRepo.fieldByColumn(relation.getReferencedColumnName());
+                return targetRepo.getValue(value, referenced);
+            }
+            return value; // assume the caller passed the id directly
+        }
+        return value instanceof Enum<?> e ? e.name() : value;
     }
 
     // ------------------------------------------------------------------ write

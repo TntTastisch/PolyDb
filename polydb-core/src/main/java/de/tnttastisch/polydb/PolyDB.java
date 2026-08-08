@@ -10,6 +10,7 @@ import de.tnttastisch.polydb.migration.core.MigrationRunner;
 import de.tnttastisch.polydb.query.CrudRepository;
 import de.tnttastisch.polydb.query.JdbcRepository;
 import de.tnttastisch.polydb.query.Repository;
+import de.tnttastisch.polydb.query.support.DerivedQueryExecutor;
 import de.tnttastisch.polydb.query.support.RepositoryFactory;
 import de.tnttastisch.polydb.schema.comparison.SchemaChange;
 import de.tnttastisch.polydb.schema.comparison.SchemaComparator;
@@ -70,7 +71,10 @@ public class PolyDB implements AutoCloseable {
         this.config = config;
         this.dialect = detectDialect(config);
         this.dataSource = createDataSource(config, dialect);
-        this.repositoryFactory = dataSource != null ? new RepositoryFactory(dataSource, dialect) : null;
+        this.repositoryFactory = dataSource != null
+                ? new RepositoryFactory(dataSource, dialect,
+                        (base, metadata) -> new DerivedQueryExecutor((JdbcRepository<?, ?>) base))
+                : null;
     }
 
     /**

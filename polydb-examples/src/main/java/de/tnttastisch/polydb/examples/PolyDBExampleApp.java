@@ -57,16 +57,22 @@ public class PolyDBExampleApp {
             // 5. The standard CRUD surface is richer now: count and existence checks come for free.
             log.info("User count: {}, user exists: {}", userRepository.count(), userRepository.existsById(user.getId()));
 
-            // 6. Read all users back from the database.
+            // 6. Derived query methods: PolyDB generates the SQL from the method name, no body needed.
+            userRepository.findByUsername("TntTastisch")
+                    .ifPresent(u -> log.info("findByUsername -> {}", u.getEmail()));
+            log.info("findByUsernameContainingIgnoreCase('tnt') -> {} match(es)",
+                    userRepository.findByUsernameContainingIgnoreCase("tnt").size());
+
+            // 7. Read all users back from the database.
             for (User u : userRepository.findAll()) {
                 log.info("Found user: {} ({})", u.getUsername(), u.getEmail());
             }
 
-            // 7. Read all posts. The @ManyToOne author is eagerly loaded, so getAuthor() is populated
+            // 8. Read all posts. The @ManyToOne author is eagerly loaded, so getAuthor() is populated
             //    without an extra query in the application code.
             for (Post post : postRepository.findAll()) {
                 log.info("Post '{}' by {}", post.getTitle(), post.getAuthor().getUsername());
             }
-        } // 8. close() is invoked automatically by try-with-resources, shutting PolyDB down cleanly.
+        } // 9. close() is invoked automatically by try-with-resources, shutting PolyDB down cleanly.
     }
 }

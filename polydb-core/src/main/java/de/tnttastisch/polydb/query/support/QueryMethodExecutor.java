@@ -25,18 +25,18 @@ public interface QueryMethodExecutor {
     Object execute(Method method, Object[] args);
 
     /**
-     * An executor that rejects every query method. Used until derived-query support is wired in, so a
-     * user who declares a finder before that capability exists gets a clear error rather than a
-     * confusing proxy failure.
+     * An executor that rejects every query method. It is the {@link RepositoryFactory} fallback when no
+     * executor is configured, so a custom query method fails with a clear error rather than a confusing
+     * proxy failure. The standard PolyDB setup installs a real executor (derived query methods), so this
+     * is normally only hit in tests or bespoke wiring.
      *
      * @return an executor that always throws {@link UnsupportedOperationException}
      */
     static QueryMethodExecutor unsupported() {
         return (method, args) -> {
             throw new UnsupportedOperationException(
-                    "Query method not supported yet: " + method.getDeclaringClass().getSimpleName()
-                            + "." + method.getName()
-                            + " (derived query methods and @Query are not implemented in this build)");
+                    "No query-method executor is configured for "
+                            + method.getDeclaringClass().getSimpleName() + "." + method.getName());
         };
     }
 }
