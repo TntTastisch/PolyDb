@@ -129,7 +129,7 @@ try (PolyDB polyDB = PolyDB.builder()
         .autoMigration(true)
         .start()) {
 
-    Repository<User> userRepository = polyDB.repository(User.class);
+    UserRepository userRepository = polyDB.getRepository(UserRepository.class);
     // ... use repositories here ...
 } // close() is invoked automatically
 ```
@@ -138,8 +138,15 @@ try (PolyDB polyDB = PolyDB.builder()
 
 ### 3. Use a repository
 
+Declare a repository interface for your entity &mdash; PolyDb implements it for you at runtime:
+
 ```java
-Repository<User> userRepository = polyDB.repository(User.class);
+public interface UserRepository extends CrudRepository<User, UUID> {
+}
+```
+
+```java
+UserRepository userRepository = polyDB.getRepository(UserRepository.class);
 
 User user = new User();
 user.setId(UUID.randomUUID());
@@ -154,6 +161,13 @@ List<User> users = userRepository.findAll();
 for (User u : users) {
     System.out.println("Found user: " + u.getUsername() + " (" + u.getEmail() + ")");
 }
+```
+
+If you don't want to declare an interface, the quick path returns a generic repository straight from
+the entity class (with the id typed as `Object`):
+
+```java
+CrudRepository<User, Object> userRepository = polyDB.repository(User.class);
 ```
 
 ---
@@ -306,23 +320,57 @@ per dialect. Owning `@ManyToOne(optional = false)` / `@JoinColumn(nullable = fal
 
 ## Repository API
 
-PolyDb provides a simple repository abstraction:
+Repositories follow a Spring Data&ndash;style interface hierarchy. The root `Repository<T, ID>` is an
+empty marker carrying the entity type and its id type; `CrudRepository<T, ID>` adds the standard
+create/read/update/delete operations. You declare an interface and PolyDb synthesises the
+implementation at runtime via a dynamic proxy &mdash; no implementation class needed:
 
 ```java
-public interface Repository<T> {
-void save(T entity);
-Optional<T> findById(Object id);
-List<T> findAll();
-void delete(T entity);
-void deleteById(Object id);
+public interface UserRepository extends CrudRepository<User, UUID> {
+}
+
+UserRepository users = polyDB.getRepository(UserRepository.class);
+```
+
+`default` methods on your interface run as written, so you can compose reusable helpers without an
+implementation class.
+
+### `CrudRepository<T, ID>`
+
+```java
+public interface CrudRepository<T, ID> extends Repository<T, ID> {
+    <S extends T> S       save(S entity);           // insert or update (upsert), cascades to relations
+    <S extends T> List<S> saveAll(Iterable<S> entities);
+    Optional<T>           findById(ID id);
+    boolean               existsById(ID id);
+    List<T>               findAll();
+    List<T>               findAllById(Iterable<ID> ids);
+    long                  count();
+    void                  delete(T entity);
+    void                  deleteById(ID id);
+    void                  deleteAllById(Iterable<? extends ID> ids);
+    void                  deleteAll(Iterable<? extends T> entities);
+    void                  deleteAll();
 }
 ```
 
 ### Example
 
 ```java
-Optional<User> user = userRepository.findById(id);
-userRepository.deleteById(id);
+User saved = userRepository.save(user);        // returns the persisted entity
+Optional<User> found = userRepository.findById(saved.getId());
+long total = userRepository.count();
+boolean present = userRepository.existsById(saved.getId());
+userRepository.deleteById(saved.getId());
+```
+
+### Without a declared interface
+
+When you don't need custom query methods, obtain a generic repository directly from the entity class.
+The id type is `Object` on this path; declare an interface (as above) for a type-safe id.
+
+```java
+CrudRepository<User, Object> users = polyDB.repository(User.class);
 ```
 
 ---

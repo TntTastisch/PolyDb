@@ -7,8 +7,10 @@ import de.tnttastisch.polydb.core.exception.PolyDBException;
 import de.tnttastisch.polydb.dialect.*;
 import de.tnttastisch.polydb.migration.core.MigrationContext;
 import de.tnttastisch.polydb.migration.core.MigrationRunner;
+import de.tnttastisch.polydb.query.CrudRepository;
 import de.tnttastisch.polydb.query.JdbcRepository;
 import de.tnttastisch.polydb.query.Repository;
+import de.tnttastisch.polydb.query.support.RepositoryFactory;
 import de.tnttastisch.polydb.schema.comparison.SchemaChange;
 import de.tnttastisch.polydb.schema.comparison.SchemaComparator;
 import de.tnttastisch.polydb.schema.db.DatabaseSchema;
@@ -52,6 +54,9 @@ public class PolyDB implements AutoCloseable {
     private final Dialect dialect;
     private final DataSource dataSource;
 
+    /** Builds proxy implementations of user-declared repository interfaces; {@code null} for NoSQL. */
+    private final RepositoryFactory repositoryFactory;
+
     /**
      * Optional handle to a non-JDBC native client (e.g. a future {@code MongoClient} or
      * {@code CqlSession}). Such clients are not {@link DataSource}s, so they are tracked separately
@@ -65,6 +70,7 @@ public class PolyDB implements AutoCloseable {
         this.config = config;
         this.dialect = detectDialect(config);
         this.dataSource = createDataSource(config, dialect);
+        this.repositoryFactory = dataSource != null ? new RepositoryFactory(dataSource, dialect) : null;
     }
 
     /**
@@ -317,19 +323,55 @@ public class PolyDB implements AutoCloseable {
     }
 
     /**
-     * Returns a {@link Repository} for the given entity type, backed by this instance's data source
-     * and dialect. A new repository is created per call (they are lightweight); the entity is parsed
-     * on construction.
+     * Returns a generic {@link CrudRepository} straight from an entity class, backed by this
+     * instance's data source and dialect. This is the quick path when you do not need custom finder
+     * methods; the identifier type is left as {@link Object}. For type-safe ids and custom query
+     * methods, declare a repository interface and use {@link #getRepository(Class)} instead.
      *
+     * <p>A new repository is created per call (they are lightweight); the entity is parsed on
+     * construction.</p>
+     *
+     * @param entityClass the {@code @Entity} class to manage
+     * @param <T>         the entity type
+     * @return a CRUD repository for the entity
      * @throws IllegalStateException         if this instance has been closed
      * @throws UnsupportedOperationException for NoSQL dialects, which have no repository support yet
      */
-    public <T> Repository<T> repository(Class<T> entityClass) {
+    public <T> CrudRepository<T, Object> repository(Class<T> entityClass) {
         ensureOpen();
-        if (dataSource != null) {
-            return new JdbcRepository<>(entityClass, dataSource, dialect);
+        requireJdbc();
+        return new JdbcRepository<>(entityClass, dataSource, dialect);
+    }
+
+    /**
+     * Returns an implementation of a user-declared repository interface, synthesised at runtime via a
+     * dynamic proxy. The interface must extend {@link Repository} (usually {@link CrudRepository}); its
+     * entity and id types are resolved from the generic declaration. Standard CRUD methods are backed
+     * by a {@link JdbcRepository}; custom query methods are handled by the repository infrastructure.
+     *
+     * <p>Example:</p>
+     * <pre>{@code
+     * interface UserRepository extends CrudRepository<User, UUID> { }
+     * UserRepository users = polyDB.getRepository(UserRepository.class);
+     * }</pre>
+     *
+     * @param repositoryInterface the repository interface to implement
+     * @param <R>                 the repository interface type
+     * @return a ready-to-use implementation
+     * @throws IllegalStateException         if this instance has been closed
+     * @throws UnsupportedOperationException for NoSQL dialects, which have no repository support yet
+     */
+    public <R extends Repository<?, ?>> R getRepository(Class<R> repositoryInterface) {
+        ensureOpen();
+        requireJdbc();
+        return repositoryFactory.create(repositoryInterface);
+    }
+
+    /** Guards repository access against NoSQL dialects, which have no data source or proxy support. */
+    private void requireJdbc() {
+        if (dataSource == null) {
+            throw new UnsupportedOperationException("NoSQL repositories not yet implemented");
         }
-        throw new UnsupportedOperationException("NoSQL repositories not yet implemented");
     }
 
     private void ensureOpen() {

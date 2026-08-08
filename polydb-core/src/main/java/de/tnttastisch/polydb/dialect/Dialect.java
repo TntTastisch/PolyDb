@@ -44,6 +44,36 @@ public interface Dialect {
 
     String quoteIdentifier(String identifier);
 
+    // ------------------------------------------------------------------ paging
+
+    /**
+     * Renders the row-limiting clause appended to a {@code SELECT}, e.g. {@code LIMIT 10 OFFSET 20}.
+     * Both bounds are optional; either or both may be {@code null}, and when both are {@code null} an
+     * empty string is returned so no clause is appended.
+     *
+     * <p>The values are inlined as integer literals rather than bound as parameters: they originate
+     * from trusted paging inputs (never from user-supplied strings), and inlining keeps the clause
+     * self-contained across dialects whose {@code LIMIT}/{@code OFFSET} syntax differs. The default
+     * emits the standard {@code LIMIT ... OFFSET ...} form; dialects whose syntax differs (Oracle,
+     * SQL Server, DB2, Firebird) override this.</p>
+     *
+     * @param limit  the maximum number of rows, or {@code null} for no cap
+     * @param offset the number of leading rows to skip, or {@code null} for none
+     * @return the clause without a leading space, or an empty string when neither bound is set
+     */
+    default String getLimitClause(Long limit, Long offset) {
+        StringBuilder clause = new StringBuilder();
+        if (limit != null) {
+            clause.append("LIMIT ").append(limit);
+            if (offset != null) {
+                clause.append(" OFFSET ").append(offset);
+            }
+        } else if (offset != null) {
+            clause.append("OFFSET ").append(offset);
+        }
+        return clause.toString();
+    }
+
     // ------------------------------------------------------------------ foreign keys
 
     /**
