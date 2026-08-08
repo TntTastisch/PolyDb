@@ -9,13 +9,14 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Thin JDBC helper that runs parameterised SQL against a {@link DataSource}. It owns connection and
- * statement lifecycle (every call borrows a connection, prepares a statement and closes both via
- * try-with-resources) so callers only supply SQL, positional parameters and, for reads, a mapper.
+ * Thin JDBC helper that runs parameterised SQL against a {@link DataSource}. When a
+ * {@link TransactionTemplate} is active for the data source on the current thread, every call runs on
+ * that transaction's shared connection and leaves it open; otherwise each call borrows a fresh
+ * connection and closes it (auto-commit). Either way the caller only supplies SQL, positional
+ * parameters and, for reads, a mapper.
  *
- * <p>Each call uses its own connection; the executor does not span statements in a transaction, so
- * a sequence of updates is not atomic with respect to one another. Checked {@link SQLException}s are
- * wrapped in unchecked {@link RuntimeException}s so the calling code is not forced to handle them.</p>
+ * <p>Parameters are bound positionally with {@link PreparedStatement#setObject}. Checked
+ * {@link SQLException}s are wrapped in unchecked {@link RuntimeException}s.</p>
  */
 public class QueryExecutor {
 
@@ -28,11 +29,6 @@ public class QueryExecutor {
     /**
      * Runs a {@code SELECT} (or any query producing a result set) and maps every returned row.
      *
-     * <p>Parameters are bound positionally: element {@code i} of {@code params} is bound to JDBC
-     * placeholder {@code i + 1} (placeholders are 1-based). Values are bound with
-     * {@link PreparedStatement#setObject}, leaving type handling to the driver. The mapper is invoked
-     * once per row with the cursor already advanced onto it.</p>
-     *
      * @param sql    the query, using {@code ?} placeholders
      * @param params positional parameter values, in placeholder order
      * @param mapper maps each result-set row to a {@code T}
@@ -42,28 +38,30 @@ public class QueryExecutor {
      */
     public <T> List<T> executeQuery(String sql, List<Object> params, ResultMapper<T> mapper) {
         List<T> results = new ArrayList<>();
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
-
-            // JDBC placeholders are 1-based, so shift the 0-based list index by one.
-            for (int i = 0; i < params.size(); i++) {
-                pstmt.setObject(i + 1, params.get(i));
+        Connection connection = TransactionResources.boundConnection(dataSource);
+        boolean managed = connection != null;
+        try {
+            if (!managed) {
+                connection = dataSource.getConnection();
             }
-
-            try (ResultSet rs = pstmt.executeQuery()) {
-                while (rs.next()) {
-                    results.add(mapper.map(rs));
+            try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+                bind(pstmt, params);
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    while (rs.next()) {
+                        results.add(mapper.map(rs));
+                    }
                 }
             }
         } catch (SQLException e) {
             throw new RuntimeException("Query execution failed", e);
+        } finally {
+            closeIfUnmanaged(connection, managed);
         }
         return results;
     }
 
     /**
-     * Runs an {@code INSERT}, {@code UPDATE} or {@code DELETE} with the given positional parameters,
-     * bound the same way as {@link #executeQuery}.
+     * Runs an {@code INSERT}, {@code UPDATE} or {@code DELETE} with the given positional parameters.
      *
      * @param sql    the statement, using {@code ?} placeholders
      * @param params positional parameter values, in placeholder order
@@ -71,17 +69,38 @@ public class QueryExecutor {
      * @throws RuntimeException if execution fails (wraps the {@link SQLException})
      */
     public int executeUpdate(String sql, List<Object> params) {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
-
-            // Same 1-based positional binding as executeQuery.
-            for (int i = 0; i < params.size(); i++) {
-                pstmt.setObject(i + 1, params.get(i));
+        Connection connection = TransactionResources.boundConnection(dataSource);
+        boolean managed = connection != null;
+        try {
+            if (!managed) {
+                connection = dataSource.getConnection();
             }
-
-            return pstmt.executeUpdate();
+            try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+                bind(pstmt, params);
+                return pstmt.executeUpdate();
+            }
         } catch (SQLException e) {
             throw new RuntimeException("Update execution failed", e);
+        } finally {
+            closeIfUnmanaged(connection, managed);
+        }
+    }
+
+    /** Binds positional parameters: element {@code i} maps to the 1-based placeholder {@code i + 1}. */
+    private static void bind(PreparedStatement pstmt, List<Object> params) throws SQLException {
+        for (int i = 0; i < params.size(); i++) {
+            pstmt.setObject(i + 1, params.get(i));
+        }
+    }
+
+    /** Closes a connection only when it was borrowed for this call (never a transaction's connection). */
+    private static void closeIfUnmanaged(Connection connection, boolean managed) {
+        if (connection != null && !managed) {
+            try {
+                connection.close();
+            } catch (SQLException ignored) {
+                // best-effort close of a per-call connection
+            }
         }
     }
 }

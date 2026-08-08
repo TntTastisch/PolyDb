@@ -2,6 +2,9 @@ package de.tnttastisch.polydb.dialect;
 
 import de.tnttastisch.polydb.schema.model.FieldModel;
 
+import java.util.List;
+import java.util.stream.Collectors;
+
 /**
  * Dialect for PostgreSQL. Uses standard double-quoted identifiers and supports foreign keys, both
  * inherited from {@link AbstractSqlDialect}.
@@ -61,5 +64,17 @@ public class PostgreSqlDialect extends AbstractSqlDialect {
     public String getModifyColumnSql(String tableName, FieldModel field) {
         return "ALTER TABLE " + tableName + " ALTER COLUMN " + field.getColumnName() + " TYPE " + getSqlType(field) +
                 (field.isNullable() ? ", ALTER COLUMN " + field.getColumnName() + " DROP NOT NULL" : ", ALTER COLUMN " + field.getColumnName() + " SET NOT NULL");
+    }
+
+    /** PostgreSQL uses {@code INSERT ... ON CONFLICT (keys) DO UPDATE SET ... = EXCLUDED....}. */
+    @Override
+    public String getUpsertSql(String tableName, List<String> columns, List<String> keyColumns) {
+        String placeholders = columns.stream().map(c -> "?").collect(Collectors.joining(", "));
+        String updates = columns.stream()
+                .filter(c -> !keyColumns.contains(c))
+                .map(c -> c + " = EXCLUDED." + c)
+                .collect(Collectors.joining(", "));
+        return "INSERT INTO " + tableName + " (" + String.join(", ", columns) + ") VALUES (" + placeholders + ")" +
+                " ON CONFLICT (" + String.join(", ", keyColumns) + ") DO UPDATE SET " + updates;
     }
 }

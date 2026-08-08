@@ -184,6 +184,15 @@ public abstract class AbstractSqlDialect implements Dialect {
     }
 
     /**
+     * SQL databases generally support transactional DDL; the exceptions (MySQL, MariaDB, Oracle, which
+     * implicitly commit each DDL statement) override this back to {@code false}.
+     */
+    @Override
+    public boolean supportsTransactionalDdl() {
+        return true;
+    }
+
+    /**
      * Deterministic, reproducible constraint name so a foreign key can be added inline at creation
      * time and later detected / dropped.
      */

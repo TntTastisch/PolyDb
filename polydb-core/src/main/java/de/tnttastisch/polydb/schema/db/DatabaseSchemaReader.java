@@ -54,6 +54,7 @@ public class DatabaseSchemaReader {
                     }
 
                     readForeignKeys(metaData, catalog, schemaName, tableName, tableSchema);
+                    readIndexes(metaData, catalog, schemaName, tableName, tableSchema);
 
                     schema.addTable(tableSchema);
                 }
@@ -76,6 +77,21 @@ public class DatabaseSchemaReader {
             }
         } catch (SQLException ignored) {
             // Driver does not support imported-key metadata; treat as "no known foreign keys".
+        }
+    }
+
+    /**
+     * Reads the names of indexes on {@code tableName} so migration preconditions ({@code ifIndexExists})
+     * can be evaluated. Non-unique, approximate stats are requested (cheap); rows without an index name
+     * (e.g. {@code tableIndexStatistic}) are skipped. Failures are tolerated as "no known indexes".
+     */
+    private void readIndexes(DatabaseMetaData metaData, String catalog, String schemaName, String tableName, TableSchema tableSchema) {
+        try (ResultSet indexes = metaData.getIndexInfo(catalog, schemaName, tableName, false, true)) {
+            while (indexes.next()) {
+                tableSchema.addIndex(indexes.getString("INDEX_NAME"));
+            }
+        } catch (SQLException ignored) {
+            // Driver does not support index metadata; treat as "no known indexes".
         }
     }
 }

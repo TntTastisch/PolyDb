@@ -44,6 +44,36 @@ public interface Dialect {
 
     String quoteIdentifier(String identifier);
 
+    // ------------------------------------------------------------------ paging
+
+    /**
+     * Renders the row-limiting clause appended to a {@code SELECT}, e.g. {@code LIMIT 10 OFFSET 20}.
+     * Both bounds are optional; either or both may be {@code null}, and when both are {@code null} an
+     * empty string is returned so no clause is appended.
+     *
+     * <p>The values are inlined as integer literals rather than bound as parameters: they originate
+     * from trusted paging inputs (never from user-supplied strings), and inlining keeps the clause
+     * self-contained across dialects whose {@code LIMIT}/{@code OFFSET} syntax differs. The default
+     * emits the standard {@code LIMIT ... OFFSET ...} form; dialects whose syntax differs (Oracle,
+     * SQL Server, DB2, Firebird) override this.</p>
+     *
+     * @param limit  the maximum number of rows, or {@code null} for no cap
+     * @param offset the number of leading rows to skip, or {@code null} for none
+     * @return the clause without a leading space, or an empty string when neither bound is set
+     */
+    default String getLimitClause(Long limit, Long offset) {
+        StringBuilder clause = new StringBuilder();
+        if (limit != null) {
+            clause.append("LIMIT ").append(limit);
+            if (offset != null) {
+                clause.append(" OFFSET ").append(offset);
+            }
+        } else if (offset != null) {
+            clause.append("OFFSET ").append(offset);
+        }
+        return clause.toString();
+    }
+
     // ------------------------------------------------------------------ foreign keys
 
     /**
@@ -73,4 +103,55 @@ public interface Dialect {
      * {@code null} when none is required. SQLite returns {@code PRAGMA foreign_keys = ON}.
      */
     String getEnableForeignKeysStatement();
+
+    // ------------------------------------------------------------------ migration-engine primitives
+
+    /**
+     * {@code ALTER TABLE ... RENAME TO ...}. Understood by PostgreSQL, H2, Oracle, SQLite and
+     * MySQL/MariaDB 8+; the default is the SQL-standard form. Provided as a {@code default} so the
+     * NoSQL dialects that implement this interface directly keep compiling.
+     */
+    default String getRenameTableSql(String oldTableName, String newTableName) {
+        return "ALTER TABLE " + oldTableName + " RENAME TO " + newTableName;
+    }
+
+    /** {@code ALTER TABLE ... RENAME COLUMN ... TO ...} (portable across PostgreSQL/H2/Oracle/MySQL 8+). */
+    default String getRenameColumnSql(String tableName, String oldColumnName, String newColumnName) {
+        return "ALTER TABLE " + tableName + " RENAME COLUMN " + oldColumnName + " TO " + newColumnName;
+    }
+
+    /**
+     * Drops a named foreign-key constraint. The default uses {@code DROP CONSTRAINT} (PostgreSQL, H2,
+     * Oracle, SQL Server, DB2); MySQL/MariaDB override it with {@code DROP FOREIGN KEY}.
+     */
+    default String getDropForeignKeySql(String tableName, String constraintName) {
+        return "ALTER TABLE " + tableName + " DROP CONSTRAINT " + constraintName;
+    }
+
+    /**
+     * Whether the backend can roll back DDL inside a transaction. When {@code true}, the migration
+     * engine wraps a whole migration in a single transaction and rolls back on failure; when
+     * {@code false}, it applies operations one by one and compensates on failure by running each
+     * applied operation's reverse. Defaults to {@code false} (conservative); {@link AbstractSqlDialect}
+     * enables it, and MySQL/MariaDB/Oracle turn it back off (they implicitly commit each DDL statement).
+     */
+    default boolean supportsTransactionalDdl() {
+        return false;
+    }
+
+    /**
+     * Renders an idempotent "insert or update" for {@code columns}, matched on {@code keyColumns}. The
+     * default uses the SQL-standard {@code MERGE ... KEY (...)} form (understood by H2); vendors with a
+     * dedicated syntax (PostgreSQL {@code ON CONFLICT}, MySQL {@code ON DUPLICATE KEY}) override it.
+     * The statement always binds exactly one parameter per column in {@code columns} order.
+     */
+    default String getUpsertSql(String tableName, List<String> columns, List<String> keyColumns) {
+        StringBuilder placeholders = new StringBuilder();
+        for (int i = 0; i < columns.size(); i++) {
+            if (i > 0) placeholders.append(", ");
+            placeholders.append("?");
+        }
+        return "MERGE INTO " + tableName + " (" + String.join(", ", columns) + ") KEY (" +
+                String.join(", ", keyColumns) + ") VALUES (" + placeholders + ")";
+    }
 }

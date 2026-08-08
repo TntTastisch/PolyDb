@@ -1,6 +1,10 @@
 package de.tnttastisch.polydb.schema.comparison;
 
 import de.tnttastisch.polydb.dialect.AbstractSqlDialect;
+import de.tnttastisch.polydb.migration.operation.AddColumnOperation;
+import de.tnttastisch.polydb.migration.operation.AddForeignKeyOperation;
+import de.tnttastisch.polydb.migration.operation.CreateTableOperation;
+import de.tnttastisch.polydb.migration.operation.MigrationOperation;
 import de.tnttastisch.polydb.schema.db.ColumnSchema;
 import de.tnttastisch.polydb.schema.db.DatabaseSchema;
 import de.tnttastisch.polydb.schema.db.TableSchema;
@@ -16,26 +20,27 @@ import java.util.*;
 /**
  * Diffs the desired schema (the parsed {@link EntityModel}s) against the actual
  * {@link DatabaseSchema} read from the live database and produces the ordered list of
- * {@link SchemaChange}s needed to reconcile them. It only ever adds structure — missing tables,
+ * {@link MigrationOperation}s needed to reconcile them. It only ever adds structure — missing tables,
  * columns and foreign keys — and never drops existing objects, so running it is non-destructive.
  *
- * <p>The hard part is ordering: a foreign key can only be created once its referenced table exists.
- * The comparator topologically orders new tables, emits each table's foreign keys inline when the
- * target is already available, and defers the rest (cycle-closing or forward references) to
- * {@code ALTER TABLE} statements appended at the end.</p>
+ * <p>The operations it emits are the same ones a manual migration produces, so both flow through the
+ * shared migration executor and dialect renderer. The hard part is ordering: a foreign key can only be
+ * created once its referenced table exists. The comparator topologically orders new tables, emits each
+ * table's foreign keys inline when the target is already available, and defers the rest (cycle-closing
+ * or forward references) to {@code ALTER TABLE} statements appended at the end.</p>
  */
 public class SchemaComparator {
 
     private static final Logger log = LoggerFactory.getLogger(SchemaComparator.class);
 
     /**
-     * Computes the changes required to bring {@code dbSchema} in line with {@code entities}. Missing
+     * Computes the operations required to bring {@code dbSchema} in line with {@code entities}. Missing
      * entity tables (and synthesised many-to-many join tables) are scheduled for creation; existing
      * tables are checked for missing columns and foreign keys.
      *
-     * @return migration steps in dependency-safe execution order.
+     * @return migration operations in dependency-safe execution order.
      */
-    public List<SchemaChange> compare(List<EntityModel> entities, DatabaseSchema dbSchema) {
+    public List<MigrationOperation> compare(List<EntityModel> entities, DatabaseSchema dbSchema) {
         Map<String, EntityModel> entityByClass = new HashMap<>();
         for (EntityModel entity : entities) {
             entityByClass.put(entity.getClassName(), entity);
@@ -43,8 +48,8 @@ public class SchemaComparator {
 
         // Newly required tables (entities + synthesised many-to-many join tables).
         List<EntityModel> toCreate = new ArrayList<>();
-        List<SchemaChange> columnChanges = new ArrayList<>();
-        List<SchemaChange> existingTableForeignKeys = new ArrayList<>();
+        List<MigrationOperation> columnChanges = new ArrayList<>();
+        List<MigrationOperation> existingTableForeignKeys = new ArrayList<>();
 
         for (EntityModel entity : entities) {
             TableSchema dbTable = dbSchema.getTable(entity.getTableName());
@@ -69,18 +74,18 @@ public class SchemaComparator {
     /**
      * Orders the new tables and decides, per owning foreign key, whether it can be emitted inline
      * with its {@code CREATE TABLE} (referenced table already available) or must be deferred to a
-     * trailing {@code ALTER TABLE} (cyclic or forward reference). Returns the full statement list in
+     * trailing {@code ALTER TABLE} (cyclic or forward reference). Returns the full operation list in
      * execution order: creates, then column additions, then deferred and existing-table foreign keys.
      */
-    private List<SchemaChange> assemble(List<EntityModel> toCreate, List<SchemaChange> columnChanges, List<SchemaChange> existingTableForeignKeys, DatabaseSchema dbSchema) {
+    private List<MigrationOperation> assemble(List<EntityModel> toCreate, List<MigrationOperation> columnChanges, List<MigrationOperation> existingTableForeignKeys, DatabaseSchema dbSchema) {
         List<EntityModel> ordered = topologicalOrder(toCreate);
 
         // Tables that exist by the time a given CREATE runs: pre-existing DB tables plus those
         // created earlier in this ordering.
         Set<String> available = new HashSet<>(dbSchema.getTables().keySet());
 
-        List<SchemaChange> creates = new ArrayList<>();
-        List<SchemaChange> deferredForeignKeys = new ArrayList<>();
+        List<MigrationOperation> creates = new ArrayList<>();
+        List<MigrationOperation> deferredForeignKeys = new ArrayList<>();
 
         for (EntityModel entity : ordered) {
             String table = entity.getTableName().toLowerCase();
@@ -100,11 +105,11 @@ public class SchemaComparator {
                         entity.getTableName(), relation.getJoinColumnName(), relation.getReferencedTable());
             }
 
-            creates.add(new SchemaChange.CreateTable(entity, inline));
+            creates.add(new CreateTableOperation(entity.getTableName(), entity.getFields(), inline));
             available.add(table);
         }
 
-        List<SchemaChange> result = new ArrayList<>();
+        List<MigrationOperation> result = new ArrayList<>();
         result.addAll(creates);
         result.addAll(columnChanges);
         result.addAll(deferredForeignKeys);
@@ -113,23 +118,23 @@ public class SchemaComparator {
     }
 
     /**
-     * Adds an {@link SchemaChange.AddColumn} for every entity column absent from the existing table.
+     * Adds an {@link AddColumnOperation} for every entity column absent from the existing table.
      * Existing columns are left untouched (no type/nullability reconciliation is attempted here).
      */
-    private void compareColumns(EntityModel entity, TableSchema dbTable, List<SchemaChange> changes) {
+    private void compareColumns(EntityModel entity, TableSchema dbTable, List<MigrationOperation> changes) {
         for (FieldModel field : entity.getFields()) {
             ColumnSchema dbColumn = dbTable.getColumns().get(field.getColumnName().toLowerCase());
             if (dbColumn == null) {
-                changes.add(new SchemaChange.AddColumn(entity.getTableName(), field));
+                changes.add(new AddColumnOperation(entity.getTableName(), field));
             }
         }
     }
 
     /**
-     * Adds an {@link SchemaChange.AddForeignKey} for every owning relation whose constraint is not
-     * already present on the existing table, so re-running migration does not duplicate constraints.
+     * Adds an {@link AddForeignKeyOperation} for every owning relation whose constraint is not already
+     * present on the existing table, so re-running migration does not duplicate constraints.
      */
-    private void compareForeignKeys(EntityModel entity, TableSchema dbTable, List<SchemaChange> changes) {
+    private void compareForeignKeys(EntityModel entity, TableSchema dbTable, List<MigrationOperation> changes) {
         for (RelationModel relation : owningColumnRelations(entity)) {
             if (!dbTable.hasForeignKeyOn(relation.getJoinColumnName())) {
                 changes.add(toAddForeignKey(entity.getTableName(), relation));
@@ -137,9 +142,9 @@ public class SchemaComparator {
         }
     }
 
-    private SchemaChange.AddForeignKey toAddForeignKey(String tableName, RelationModel relation) {
+    private AddForeignKeyOperation toAddForeignKey(String tableName, RelationModel relation) {
         String constraintName = AbstractSqlDialect.foreignKeyConstraintName(tableName, relation.getJoinColumnName());
-        return new SchemaChange.AddForeignKey(tableName, constraintName, relation.getJoinColumnName(),
+        return new AddForeignKeyOperation(tableName, constraintName, relation.getJoinColumnName(),
                 relation.getReferencedTable(), relation.getReferencedColumnName());
     }
 

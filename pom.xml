@@ -10,7 +10,7 @@
     <!-- ================================================================== -->
     <groupId>de.tnttastisch</groupId>
     <artifactId>polydb</artifactId>
-    <version>0.1.5-DEV</version>
+    <version>0.2.0-DEV</version>
     <packaging>pom</packaging>
 
     <name>PolyDB :: Parent</name>
@@ -18,13 +18,25 @@
     <url>https://github.com/tnttastisch/polydb</url>
 
     <developers>
-
-
         <developer>
             <name>TntTastisch</name>
             <url>https://tnttastisch.de/</url>
         </developer>
     </developers>
+
+    <distributionManagement>
+        <repository>
+            <id>tnttastisch-repo-releases</id>
+            <name>TntTastisch Repository</name>
+            <url>https://repo.tnttastisch.de/releases</url>
+        </repository>
+        <snapshotRepository>
+            <id>tnttastisch-repo-developers</id>
+            <name>TntTastisch Developers</name>
+            <url>https://repo.tnttastisch.de/developers</url>
+        </snapshotRepository>
+    </distributionManagement>
+
 
     <modules>
         <module>polydb-core</module>
@@ -319,5 +331,23 @@
             </plugin>
         </plugins>
     </build>
+
+    <!-- ================================================================== -->
+    <!--  Deploy target profiles                                            -->
+    <!--    mvn deploy               -> developers repo (default distMgmt)   -->
+    <!--    mvn deploy -Prelease     -> releases repo                        -->
+    <!-- ================================================================== -->
+    <profiles>
+        <profile>
+            <id>release</id>
+            <distributionManagement>
+                <repository>
+                    <id>tnttastisch-repo-releases</id>
+                    <name>TntTastisch Releases</name>
+                    <url>https://repo.tnttastisch.de/releases</url>
+                </repository>
+            </distributionManagement>
+        </profile>
+    </profiles>
 
 </project>

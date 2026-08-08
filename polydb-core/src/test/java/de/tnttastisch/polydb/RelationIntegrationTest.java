@@ -1,6 +1,6 @@
 package de.tnttastisch.polydb;
 
-import de.tnttastisch.polydb.query.Repository;
+import de.tnttastisch.polydb.query.CrudRepository;
 import de.tnttastisch.polydb.testentities.Author;
 import de.tnttastisch.polydb.testentities.Book;
 import org.junit.jupiter.api.Test;
@@ -14,7 +14,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /**
  * End-to-end relation behaviour against a real (in-memory H2) database, covering the full
  * parse &rarr; migrate &rarr; persist &rarr; query path through the {@link PolyDB} facade and its
- * {@link Repository} instances. Exercises the {@link Author}/{@link Book} one-to-many / many-to-one
+ * {@link CrudRepository} instances. Exercises the {@link Author}/{@link Book} one-to-many / many-to-one
  * pair: cascade-persist, eager loading of the owning side, foreign-key enforcement and idempotent
  * re-migration. Every test runs on its own uniquely named database with auto-migration enabled.
  */
@@ -41,8 +41,8 @@ class RelationIntegrationTest {
     @Test
     void persistsRelatedEntitiesViaCascadeAndLoadsEagerRelationOnRead() {
         try (PolyDB db = start("rel_" + UUID.randomUUID().toString().replace("-", ""))) {
-            Repository<Author> authors = db.repository(Author.class);
-            Repository<Book> books = db.repository(Book.class);
+            CrudRepository<Author, Object> authors = db.repository(Author.class);
+            CrudRepository<Book, Object> books = db.repository(Book.class);
 
             Author author = new Author(UUID.randomUUID(), "Jane");
             author.addBook(new Book(UUID.randomUUID(), "First", author));
@@ -68,7 +68,7 @@ class RelationIntegrationTest {
     @Test
     void enforcesForeignKeyWhenReferencedRowIsMissing() {
         try (PolyDB db = start("fk_" + UUID.randomUUID().toString().replace("-", ""))) {
-            Repository<Book> books = db.repository(Book.class);
+            CrudRepository<Book, Object> books = db.repository(Book.class);
 
             // The author is never saved (no cascade on the owning side) -> the foreign key is violated.
             Author ghost = new Author(UUID.randomUUID(), "Ghost");
@@ -89,7 +89,7 @@ class RelationIntegrationTest {
         start(name).close();
         // second run against the same in-memory database must be idempotent (tables + FKs already exist)
         try (PolyDB db = start(name)) {
-            Repository<Author> authors = db.repository(Author.class);
+            CrudRepository<Author, Object> authors = db.repository(Author.class);
             assertThat(authors.findAll()).isEmpty();
         }
     }

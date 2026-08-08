@@ -4,6 +4,7 @@ import de.tnttastisch.polydb.schema.model.FieldModel;
 import de.tnttastisch.polydb.schema.model.RelationModel;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * Dialect for MySQL. Serves as the base for the {@link MariaDbDialect}, which only diverges on a
@@ -66,5 +67,29 @@ public class MySqlDialect extends AbstractSqlDialect {
     public String quoteIdentifier(String identifier) {
         if (identifier == null) return null;
         return "`" + identifier + "`";
+    }
+
+    /** MySQL implicitly commits each DDL statement, so a migration cannot be rolled back as a unit. */
+    @Override
+    public boolean supportsTransactionalDdl() {
+        return false;
+    }
+
+    /** MySQL/MariaDB spell foreign-key removal as {@code DROP FOREIGN KEY}, not {@code DROP CONSTRAINT}. */
+    @Override
+    public String getDropForeignKeySql(String tableName, String constraintName) {
+        return "ALTER TABLE " + tableName + " DROP FOREIGN KEY " + constraintName;
+    }
+
+    /** MySQL uses {@code INSERT ... ON DUPLICATE KEY UPDATE}; {@code VALUES(col)} avoids extra parameters. */
+    @Override
+    public String getUpsertSql(String tableName, List<String> columns, List<String> keyColumns) {
+        String placeholders = columns.stream().map(c -> "?").collect(Collectors.joining(", "));
+        String updates = columns.stream()
+                .filter(c -> !keyColumns.contains(c))
+                .map(c -> c + " = VALUES(" + c + ")")
+                .collect(Collectors.joining(", "));
+        return "INSERT INTO " + tableName + " (" + String.join(", ", columns) + ") VALUES (" + placeholders + ")" +
+                " ON DUPLICATE KEY UPDATE " + updates;
     }
 }

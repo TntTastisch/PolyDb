@@ -21,6 +21,9 @@ public class TableSchema {
      */
     private final Set<String> foreignKeyColumns = new HashSet<>();
 
+    /** Lower-cased names of indexes present on this table (used by migration preconditions). */
+    private final Set<String> indexNames = new HashSet<>();
+
     public TableSchema(String name) {
         this.name = name;
     }
@@ -53,5 +56,20 @@ public class TableSchema {
      */
     public boolean hasForeignKeyOn(String columnName) {
         return columnName != null && foreignKeyColumns.contains(columnName.toLowerCase());
+    }
+
+    public Set<String> getIndexNames() {
+        return indexNames;
+    }
+
+    public void addIndex(String indexName) {
+        if (indexName != null) {
+            indexNames.add(indexName.toLowerCase());
+        }
+    }
+
+    /** @return {@code true} if an index named {@code indexName} exists on this table (case-insensitive). */
+    public boolean hasIndex(String indexName) {
+        return indexName != null && indexNames.contains(indexName.toLowerCase());
     }
 }

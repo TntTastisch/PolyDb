@@ -41,6 +41,12 @@ public class PolyDBConfig {
      */
     private final boolean autoMigration;
 
+    /**
+     * When {@code true}, PolyDB computes and logs the schema/migration plan and its SQL but applies
+     * <em>no</em> changes to the database (a dry run). Defaults to {@code false}.
+     */
+    private final boolean dryRun;
+
     /** Additional, free-form properties for callers/integrations; never {@code null} (empty by default). */
     private final Properties extraProperties;
 
@@ -51,6 +57,7 @@ public class PolyDBConfig {
         this.driverClassName = builder.driverClassName;
         this.entityPackage = builder.entityPackage;
         this.autoMigration = builder.autoMigration;
+        this.dryRun = builder.dryRun;
         this.extraProperties = builder.extraProperties;
     }
 
@@ -78,6 +85,11 @@ public class PolyDBConfig {
         return autoMigration;
     }
 
+    /** Whether PolyDB runs in dry-run mode (computes and logs plans/SQL without applying them). */
+    public boolean isDryRun() {
+        return dryRun;
+    }
+
     public Properties getExtraProperties() {
         return extraProperties;
     }
@@ -94,6 +106,7 @@ public class PolyDBConfig {
         private String driverClassName;
         private String entityPackage;
         private boolean autoMigration = true;
+        private boolean dryRun = false;
         private Properties extraProperties = new Properties();
 
         public Builder url(String url) {
@@ -123,6 +136,12 @@ public class PolyDBConfig {
 
         public Builder autoMigration(boolean autoMigration) {
             this.autoMigration = autoMigration;
+            return this;
+        }
+
+        /** Enables dry-run mode: plans and SQL are computed and logged, but nothing is applied. */
+        public Builder dryRun(boolean dryRun) {
+            this.dryRun = dryRun;
             return this;
         }
 

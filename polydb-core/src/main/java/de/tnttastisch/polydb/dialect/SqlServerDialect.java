@@ -58,4 +58,22 @@ public class SqlServerDialect extends AbstractSqlDialect {
         return "ALTER TABLE " + tableName + " ALTER COLUMN " + field.getColumnName() + " " + getSqlType(field) +
                 (field.isNullable() ? " NULL" : " NOT NULL");
     }
+
+    /**
+     * SQL Server (2012+) uses the ANSI {@code OFFSET ... FETCH} form rather than {@code LIMIT}. It also
+     * requires an {@code ORDER BY} to be present; the repository always supplies one (falling back to
+     * the primary key) whenever it paginates, so the clause is safe to emit.
+     */
+    @Override
+    public String getLimitClause(Long limit, Long offset) {
+        if (limit == null && offset == null) {
+            return "";
+        }
+        long skip = offset == null ? 0 : offset;
+        StringBuilder clause = new StringBuilder("OFFSET ").append(skip).append(" ROWS");
+        if (limit != null) {
+            clause.append(" FETCH NEXT ").append(limit).append(" ROWS ONLY");
+        }
+        return clause.toString();
+    }
 }

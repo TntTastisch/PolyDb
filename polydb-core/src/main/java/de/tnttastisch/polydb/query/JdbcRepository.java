@@ -2,8 +2,12 @@ package de.tnttastisch.polydb.query;
 
 import de.tnttastisch.polydb.core.annotations.CascadeType;
 import de.tnttastisch.polydb.core.annotations.FetchType;
+import de.tnttastisch.polydb.core.exception.OptimisticLockException;
 import de.tnttastisch.polydb.core.exception.PolyDBException;
 import de.tnttastisch.polydb.dialect.Dialect;
+import de.tnttastisch.polydb.query.sql.Condition;
+import de.tnttastisch.polydb.query.sql.Order;
+import de.tnttastisch.polydb.query.sql.SqlBuilder;
 import de.tnttastisch.polydb.schema.model.EntityModel;
 import de.tnttastisch.polydb.schema.model.FieldModel;
 import de.tnttastisch.polydb.schema.model.RelationModel;
@@ -11,18 +15,29 @@ import de.tnttastisch.polydb.schema.parser.EntityParser;
 
 import javax.sql.DataSource;
 import java.lang.reflect.Field;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.OffsetDateTime;
+import java.time.ZonedDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * JDBC-backed repository. In addition to scalar CRUD it resolves entity relations: owning foreign
- * keys are written from the associated entity's id, eager associations are loaded one level deep on
- * read, and {@link CascadeType} operations are propagated to associated entities.
+ * JDBC-backed {@link CrudRepository}. In addition to scalar CRUD it resolves entity relations: owning
+ * foreign keys are written from the associated entity's id, eager associations are loaded one level
+ * deep on read, and {@link CascadeType} operations are propagated to associated entities.
  *
- * <p>Lazy relations are not auto-populated (PolyDB does not generate runtime proxies yet) and
- * cross-table cascades are not wrapped in a single transaction.</p>
+ * <p>Reads, counts and existence checks are assembled through {@link SqlBuilder} from a
+ * {@link Condition} tree, which is also the substrate reused by derived query methods and
+ * specifications. Lazy relations are not auto-populated (PolyDB does not generate runtime proxies for
+ * associations yet) and cross-table cascades are not wrapped in a single transaction.</p>
+ *
+ * @param <T>  the entity type this repository manages
+ * @param <ID> the type of the entity's {@code @Id} field
  */
-public final class JdbcRepository<T> implements Repository<T> {
+public final class JdbcRepository<T, ID> implements PagingAndSortingRepository<T, ID>, SpecificationExecutor<T> {
 
     /** Eager relations are resolved this many levels deep from the root entity. */
     private static final int DEFAULT_DEPTH = 1;
@@ -42,13 +57,14 @@ public final class JdbcRepository<T> implements Repository<T> {
     private final DefaultResultMapper<T> mapper;
     private final EntityModel model;
     private final FieldModel idField;
-    private final Map<Class<?>, JdbcRepository<?>> registry;
+    private final LifecycleMetadata lifecycle;
+    private final Map<Class<?>, JdbcRepository<?, ?>> registry;
 
     public JdbcRepository(Class<T> entityClass, DataSource dataSource, Dialect dialect) {
         this(entityClass, dataSource, dialect, new HashMap<>());
     }
 
-    private JdbcRepository(Class<T> entityClass, DataSource dataSource, Dialect dialect, Map<Class<?>, JdbcRepository<?>> registry) {
+    private JdbcRepository(Class<T> entityClass, DataSource dataSource, Dialect dialect, Map<Class<?>, JdbcRepository<?, ?>> registry) {
         this.entityClass = entityClass;
         this.dataSource = dataSource;
         this.dialect = dialect;
@@ -59,6 +75,7 @@ public final class JdbcRepository<T> implements Repository<T> {
                 .filter(FieldModel::isId)
                 .findFirst()
                 .orElseThrow(() -> new PolyDBException("Entity " + entityClass.getName() + " has no @Id field"));
+        this.lifecycle = LifecycleMetadata.of(entityClass, model);
         this.registry = registry;
         registry.put(entityClass, this);
     }
@@ -66,45 +83,348 @@ public final class JdbcRepository<T> implements Repository<T> {
     // ------------------------------------------------------------------ public API
 
     @Override
-    public void save(T entity) {
+    public <S extends T> S save(S entity) {
         doSave(entity);
+        return entity;
     }
 
     @Override
-    @SuppressWarnings("unchecked")
-    public Optional<T> findById(Object id) {
-        return Optional.ofNullable((T) findOneById(id, DEFAULT_DEPTH));
+    public <S extends T> List<S> saveAll(Iterable<S> entities) {
+        List<S> saved = new ArrayList<>();
+        for (S entity : entities) {
+            doSave(entity);
+            saved.add(entity);
+        }
+        return saved;
     }
 
     @Override
-    @SuppressWarnings("unchecked")
+    public Optional<T> findById(ID id) {
+        if (id == null) {
+            return Optional.empty();
+        }
+        List<T> result = findWhere(Condition.eq(idField.getColumnName(), id), null, 1L, null);
+        return result.isEmpty() ? Optional.empty() : Optional.of(result.get(0));
+    }
+
+    @Override
+    public boolean existsById(ID id) {
+        if (id == null) {
+            return false;
+        }
+        return existsWhere(Condition.eq(idField.getColumnName(), id));
+    }
+
+    @Override
     public List<T> findAll() {
-        String sql = "SELECT * FROM " + model.getTableName();
-        return (List<T>) (List<?>) queryObjects(sql, List.of(), DEFAULT_DEPTH);
+        return findWhere(null, null, null, null);
+    }
+
+    @Override
+    public List<T> findAllById(Iterable<ID> ids) {
+        List<Object> idList = new ArrayList<>();
+        for (ID id : ids) {
+            if (id != null) {
+                idList.add(id);
+            }
+        }
+        if (idList.isEmpty()) {
+            return new ArrayList<>();
+        }
+        return findWhere(Condition.in(idField.getColumnName(), idList), null, null, null);
+    }
+
+    @Override
+    public long count() {
+        return countWhere(null);
+    }
+
+    @Override
+    public List<T> findAll(Sort sort) {
+        return findWhere(null, toOrders(sort), null, null);
+    }
+
+    @Override
+    public Page<T> findAll(Pageable pageable) {
+        List<Order> orders = toOrders(pageable.getSort());
+        if (orders.isEmpty()) {
+            // A deterministic order is required for stable paging (and for dialects whose OFFSET/FETCH
+            // form mandates ORDER BY), so fall back to the primary key.
+            orders = List.of(Order.asc(idField.getColumnName()));
+        }
+        List<T> content = findWhere(null, orders, (long) pageable.getPageSize(), pageable.getOffset());
+        return new PageImpl<>(content, pageable, countWhere(null));
+    }
+
+    /** Resolves a {@link Sort} over entity properties into ordering terms over the mapped columns. */
+    private List<Order> toOrders(Sort sort) {
+        List<Order> orders = new ArrayList<>();
+        for (Sort.Order order : sort.getOrders()) {
+            FieldModel field = resolveProperty(order.getProperty());
+            orders.add(new Order(field.getColumnName(), order.getDirection(), order.isIgnoreCase()));
+        }
+        return orders;
+    }
+
+    // ------------------------------------------------------------------ specifications
+
+    @Override
+    public Optional<T> findOne(Specification<T> spec) {
+        List<T> result = findWhere(conditionOf(spec), null, 1L, null);
+        return result.isEmpty() ? Optional.empty() : Optional.of(result.get(0));
+    }
+
+    @Override
+    public List<T> findAll(Specification<T> spec) {
+        return findWhere(conditionOf(spec), null, null, null);
+    }
+
+    @Override
+    public List<T> findAll(Specification<T> spec, Sort sort) {
+        return findWhere(conditionOf(spec), toOrders(sort), null, null);
+    }
+
+    @Override
+    public Page<T> findAll(Specification<T> spec, Pageable pageable) {
+        Condition condition = conditionOf(spec);
+        List<Order> orders = toOrders(pageable.getSort());
+        if (orders.isEmpty()) {
+            orders = List.of(Order.asc(idField.getColumnName()));
+        }
+        List<T> content = findWhere(condition, orders, (long) pageable.getPageSize(), pageable.getOffset());
+        return new PageImpl<>(content, pageable, countWhere(condition));
+    }
+
+    @Override
+    public long count(Specification<T> spec) {
+        return countWhere(conditionOf(spec));
+    }
+
+    @Override
+    public boolean exists(Specification<T> spec) {
+        return existsWhere(conditionOf(spec));
+    }
+
+    /** Turns a specification into a condition, resolving properties through a root bound to this repository. */
+    private Condition conditionOf(Specification<T> spec) {
+        return spec == null ? null : spec.toCondition(new RepositoryRoot<>(this));
     }
 
     @Override
     public void delete(T entity) {
-        deleteById(getValue(entity, idField));
+        deleteByIdValue(getValue(entity, idField));
+        EntityEvents.fireAfterDelete(entity);
     }
 
     @Override
-    public void deleteById(Object id) {
-        if (id == null) {
-            return;
+    public void deleteById(ID id) {
+        deleteByIdValue(id);
+    }
+
+    @Override
+    public void deleteAllById(Iterable<? extends ID> ids) {
+        for (ID id : ids) {
+            deleteByIdValue(id);
         }
-        Set<String> deleting = DELETING.get();
-        String key = entityClass.getName() + "#" + id;
-        if (!deleting.add(key)) {
-            return; // this row is already being deleted in the current cascade chain
+    }
+
+    @Override
+    public void deleteAll(Iterable<? extends T> entities) {
+        for (T entity : entities) {
+            deleteByIdValue(getValue(entity, idField));
+            EntityEvents.fireAfterDelete(entity);
         }
-        try {
-            cascadeRemove(id);
-            String sql = "DELETE FROM " + model.getTableName() + " WHERE " + idField.getColumnName() + " = ?";
-            executor.executeUpdate(sql, listOf(id));
-        } finally {
-            deleting.remove(key);
+    }
+
+    @Override
+    public void deleteAll() {
+        // Delete row by row so relation cascades fire and foreign-key ordering is respected. Rows are
+        // loaded without their relations (depth 0) since only the id is needed to drive the delete.
+        for (Object entity : queryObjects("SELECT * FROM " + model.getTableName(), List.of(), 0)) {
+            deleteByIdValue(getValue(entity, idField));
         }
+    }
+
+    // ------------------------------------------------------------------ query primitives (SPI)
+
+    // These low-level primitives take a Condition tree and are the substrate the higher repository
+    // layers build on (derived query methods, specifications). They are public so the query-method
+    // infrastructure in the support package can reach them, but they are not part of the
+    // CrudRepository interface, so an application obtaining a repository sees only the CRUD surface.
+
+    /**
+     * Core read primitive: selects entities matching {@code where} (all rows when {@code null}),
+     * ordered and paged as requested, and resolves eager relations one level deep.
+     *
+     * @param where  the predicate, or {@code null} to match all rows
+     * @param orders the ordering terms, or {@code null} for none
+     * @param limit  the maximum number of rows, or {@code null} for no cap
+     * @param offset the number of leading rows to skip, or {@code null} for none
+     * @return the matching entities
+     */
+    @SuppressWarnings("unchecked")
+    public List<T> findWhere(Condition where, List<Order> orders, Long limit, Long offset) {
+        SqlBuilder builder = SqlBuilder.from(model.getTableName())
+                .where(withDeletedFilter(where))
+                .orderBy(orders)
+                .limit(limit)
+                .offset(offset);
+        return (List<T>) (List<?>) queryObjects(builder.toSelectSql(dialect), builder.parameters(), DEFAULT_DEPTH);
+    }
+
+    /**
+     * Counts rows matching {@code where} (all rows when {@code null}).
+     *
+     * @param where the predicate, or {@code null} to count all rows
+     * @return the number of matching rows
+     */
+    public long countWhere(Condition where) {
+        SqlBuilder builder = SqlBuilder.from(model.getTableName()).where(withDeletedFilter(where));
+        List<Long> result = executor.executeQuery(builder.toCountSql(), builder.parameters(), rs -> rs.getLong(1));
+        return result.isEmpty() ? 0L : result.get(0);
+    }
+
+    /**
+     * Whether any row matches {@code where}.
+     *
+     * @param where the predicate, or {@code null} to test for any row at all
+     * @return {@code true} if at least one row matches
+     */
+    public boolean existsWhere(Condition where) {
+        return countWhere(where) > 0;
+    }
+
+    /**
+     * Deletes every row matching {@code where}, row by row so relation cascades fire (matching the
+     * semantics of {@link #deleteById}). Rows are loaded without their relations (only the id drives
+     * the delete).
+     *
+     * @param where the predicate selecting the rows to delete, or {@code null} for all rows
+     * @return the number of rows deleted
+     */
+    public long deleteWhere(Condition where) {
+        SqlBuilder builder = SqlBuilder.from(model.getTableName()).where(withDeletedFilter(where));
+        List<Object> matches = queryObjects(builder.toSelectSql(dialect), builder.parameters(), 0);
+        for (Object entity : matches) {
+            deleteByIdValue(getValue(entity, idField));
+        }
+        return matches.size();
+    }
+
+    /** The parsed, dialect-independent model describing this repository's entity. */
+    public EntityModel getModel() {
+        return model;
+    }
+
+    /** The entity type this repository manages. */
+    public Class<T> getEntityClass() {
+        return entityClass;
+    }
+
+    /** The primary-key column name, used as the default ordering for stable pagination. */
+    public String getIdColumnName() {
+        return idField.getColumnName();
+    }
+
+    /**
+     * Resolves an entity property name (as used in a derived query method, case-insensitive) to its
+     * {@link FieldModel} — a scalar column or an owning foreign-key column.
+     *
+     * @param propertyName the Java property/field name
+     * @return the matching field model
+     * @throws PolyDBException if no persistent property with that name exists
+     */
+    public FieldModel resolveProperty(String propertyName) {
+        for (FieldModel field : model.getFields()) {
+            if (field.getField().getName().equalsIgnoreCase(propertyName)) {
+                return field;
+            }
+        }
+        String known = model.getFields().stream().map(f -> f.getField().getName()).collect(Collectors.joining(", "));
+        throw new PolyDBException("No persistent property '" + propertyName + "' on " + entityClass.getName()
+                + " (known properties: " + known + ")");
+    }
+
+    /**
+     * Converts a value bound against {@code field} in a query predicate to the form the column stores:
+     * enums bind by name, foreign-key fields bind the referenced id (accepting either the associated
+     * entity or the id itself), everything else passes through.
+     *
+     * @param field the target column
+     * @param value the raw argument value
+     * @return the value to bind
+     */
+    public Object toColumnValue(FieldModel field, Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (field.isForeignKey()) {
+            RelationModel relation = field.getRelation();
+            if (relation.getTargetEntity().isInstance(value)) {
+                JdbcRepository<?, ?> targetRepo = repoFor(relation.getTargetEntity());
+                FieldModel referenced = targetRepo.fieldByColumn(relation.getReferencedColumnName());
+                return targetRepo.getValue(value, referenced);
+            }
+            return value; // assume the caller passed the id directly
+        }
+        return value instanceof Enum<?> e ? e.name() : value;
+    }
+
+    // ------------------------------------------------------------------ raw SQL (@Query SPI)
+
+    /**
+     * Runs a raw SQL {@code SELECT}, mapping each row to this entity and resolving eager relations one
+     * level deep. Used to back {@code @Query} methods that return the entity type.
+     *
+     * @param sql    the SQL, with {@code ?} placeholders
+     * @param params the positional bind values
+     * @return the mapped entities
+     */
+    @SuppressWarnings("unchecked")
+    public List<T> query(String sql, List<Object> params) {
+        return (List<T>) (List<?>) queryObjects(sql, params, DEFAULT_DEPTH);
+    }
+
+    /**
+     * Runs a raw SQL {@code SELECT} and returns the first column of every row, for scalar or aggregate
+     * {@code @Query} projections (e.g. {@code SELECT COUNT(*)} or {@code SELECT name}).
+     *
+     * @param sql    the SQL, with {@code ?} placeholders
+     * @param params the positional bind values
+     * @return the first-column values, one per row
+     */
+    public List<Object> queryScalarColumn(String sql, List<Object> params) {
+        return executor.executeQuery(sql, params, rs -> rs.getObject(1));
+    }
+
+    /**
+     * Runs a raw SQL {@code SELECT} and returns each row as a column-label &rarr; value map (insertion
+     * ordered). Used to map {@code @Query} results onto interface/record projections by column label.
+     *
+     * @param sql    the SQL, with {@code ?} placeholders
+     * @param params the positional bind values
+     * @return the rows, each as an ordered map keyed by column label
+     */
+    public List<Map<String, Object>> queryRows(String sql, List<Object> params) {
+        return executor.executeQuery(sql, params, rs -> {
+            var meta = rs.getMetaData();
+            Map<String, Object> row = new LinkedHashMap<>();
+            for (int i = 1; i <= meta.getColumnCount(); i++) {
+                row.put(meta.getColumnLabel(i), rs.getObject(i));
+            }
+            return row;
+        });
+    }
+
+    /**
+     * Runs a raw {@code INSERT}/{@code UPDATE}/{@code DELETE}. Backs {@code @Modifying @Query} methods.
+     *
+     * @param sql    the SQL, with {@code ?} placeholders
+     * @param params the positional bind values
+     * @return the number of affected rows
+     */
+    public int executeUpdate(String sql, List<Object> params) {
+        return executor.executeUpdate(sql, params);
     }
 
     // ------------------------------------------------------------------ write
@@ -116,24 +436,27 @@ public final class JdbcRepository<T> implements Repository<T> {
         }
         try {
             Object id = getValue(entity, idField);
-            if (id != null && existsById(id)) {
+            if (id != null && rowExists(id)) {
                 update(entity);
-                return;
+            } else {
+                insert(entity);
             }
-
-            insert(entity);
+            EntityEvents.fireAfterSave(entity);
         } finally {
             inFlight.remove(entity);
         }
     }
 
-    private boolean existsById(Object id) {
-        String sql = "SELECT " + idField.getColumnName() + " FROM " + model.getTableName()
-                + " WHERE " + idField.getColumnName() + " = ?";
-        return !executor.executeQuery(sql, listOf(id), rs -> Boolean.TRUE).isEmpty();
+    /** Raw existence check for the upsert decision; ignores the soft-delete filter so a soft-deleted row still updates. */
+    private boolean rowExists(Object id) {
+        SqlBuilder builder = SqlBuilder.from(model.getTableName()).where(Condition.eq(idField.getColumnName(), id));
+        List<Long> result = executor.executeQuery(builder.toCountSql(), builder.parameters(), rs -> rs.getLong(1));
+        return !result.isEmpty() && result.get(0) > 0;
     }
 
     private void insert(Object entity) {
+        applyAuditingOnInsert(entity);
+        initVersion(entity);
         cascadeSaveOwning(entity, false);
 
         List<FieldModel> columns = model.getFields().stream()
@@ -151,7 +474,14 @@ public final class JdbcRepository<T> implements Repository<T> {
     }
 
     private void update(Object entity) {
+        applyAuditingOnUpdate(entity);
         cascadeSaveOwning(entity, true);
+
+        Object priorVersion = null;
+        if (lifecycle.hasVersion()) {
+            priorVersion = getValue(entity, lifecycle.version);
+            setValue(entity, lifecycle.version, nextVersion(lifecycle.version, priorVersion));
+        }
 
         List<FieldModel> columns = model.getFields().stream()
                 .filter(field -> !field.isId())
@@ -160,14 +490,25 @@ public final class JdbcRepository<T> implements Repository<T> {
         String setClause = columns.stream()
                 .map(field -> field.getColumnName() + " = ?")
                 .collect(Collectors.joining(", "));
-        String sql = "UPDATE " + model.getTableName() + " SET " + setClause
-                + " WHERE " + idField.getColumnName() + " = ?";
+        StringBuilder sql = new StringBuilder("UPDATE ").append(model.getTableName())
+                .append(" SET ").append(setClause)
+                .append(" WHERE ").append(idField.getColumnName()).append(" = ?");
 
         List<Object> values = columns.stream()
                 .map(field -> valueForColumn(entity, field))
                 .collect(Collectors.toCollection(ArrayList::new));
         values.add(getValue(entity, idField));
-        executor.executeUpdate(sql, values);
+        if (lifecycle.hasVersion()) {
+            sql.append(" AND ").append(lifecycle.versionColumn).append(" = ?");
+            values.add(priorVersion);
+        }
+
+        int affected = executor.executeUpdate(sql.toString(), values);
+        if (lifecycle.hasVersion() && affected == 0) {
+            setValue(entity, lifecycle.version, priorVersion);
+            throw new OptimisticLockException("Concurrent update of " + entityClass.getSimpleName()
+                    + " id=" + getValue(entity, idField) + " (expected version " + priorVersion + ")");
+        }
 
         cascadeSaveInverse(entity, true);
     }
@@ -190,7 +531,7 @@ public final class JdbcRepository<T> implements Repository<T> {
         }
         // Read the column the foreign key actually references (usually the target id, but a custom
         // @JoinColumn(referencedColumnName=...) may point at another column).
-        JdbcRepository<?> targetRepo = repoFor(relation.getTargetEntity());
+        JdbcRepository<?, ?> targetRepo = repoFor(relation.getTargetEntity());
         FieldModel referenced = targetRepo.fieldByColumn(relation.getReferencedColumnName());
         return targetRepo.getValue(associated, referenced);
     }
@@ -252,7 +593,7 @@ public final class JdbcRepository<T> implements Repository<T> {
         if (children == null) {
             return;
         }
-        JdbcRepository<?> childRepo = repoFor(relation.getTargetEntity());
+        JdbcRepository<?, ?> childRepo = repoFor(relation.getTargetEntity());
         RelationModel backRef = childRepo.owningRelationByField(relation.getMappedBy());
         for (Object child : children) {
             childRepo.setValue(child, backRef.getField(), entity);
@@ -268,7 +609,7 @@ public final class JdbcRepository<T> implements Repository<T> {
         if (child == null) {
             return;
         }
-        JdbcRepository<?> childRepo = repoFor(relation.getTargetEntity());
+        JdbcRepository<?, ?> childRepo = repoFor(relation.getTargetEntity());
         RelationModel backRef = childRepo.owningRelationByField(relation.getMappedBy());
         childRepo.setValue(child, backRef.getField(), entity);
         childRepo.doSave(child);
@@ -285,7 +626,7 @@ public final class JdbcRepository<T> implements Repository<T> {
         if (targets == null) {
             return;
         }
-        JdbcRepository<?> targetRepo = repoFor(relation.getTargetEntity());
+        JdbcRepository<?, ?> targetRepo = repoFor(relation.getTargetEntity());
         boolean cascade = shouldCascadeSave(relation, updating);
         String insert = "INSERT INTO " + joinTable.getTableName()
                 + " (" + joinTable.getJoinColumn() + ", " + joinTable.getInverseJoinColumn() + ") VALUES (?, ?)";
@@ -303,6 +644,30 @@ public final class JdbcRepository<T> implements Repository<T> {
     }
 
     // ------------------------------------------------------------------ delete cascades
+
+    private void deleteByIdValue(Object id) {
+        if (id == null) {
+            return;
+        }
+        if (lifecycle.hasSoftDelete()) {
+            // Soft delete: flag the row instead of removing it (no cascade to children).
+            executor.executeUpdate("UPDATE " + model.getTableName() + " SET " + lifecycle.softDeleteColumn
+                    + " = ? WHERE " + idField.getColumnName() + " = ?", List.of(Boolean.TRUE, id));
+            return;
+        }
+        Set<String> deleting = DELETING.get();
+        String key = entityClass.getName() + "#" + id;
+        if (!deleting.add(key)) {
+            return; // this row is already being deleted in the current cascade chain
+        }
+        try {
+            cascadeRemove(id);
+            String sql = "DELETE FROM " + model.getTableName() + " WHERE " + idField.getColumnName() + " = ?";
+            executor.executeUpdate(sql, listOf(id));
+        } finally {
+            deleting.remove(key);
+        }
+    }
 
     private void cascadeRemove(Object id) {
         for (RelationModel relation : model.getRelations()) {
@@ -331,22 +696,16 @@ public final class JdbcRepository<T> implements Repository<T> {
     }
 
     private void deleteChildren(RelationModel relation, Object parentId) {
-        JdbcRepository<?> childRepo = repoFor(relation.getTargetEntity());
+        JdbcRepository<?, ?> childRepo = repoFor(relation.getTargetEntity());
         RelationModel backRef = childRepo.owningRelationByField(relation.getMappedBy());
         String sql = "SELECT * FROM " + childRepo.model.getTableName()
                 + " WHERE " + backRef.getJoinColumnName() + " = ?";
         for (Object child : childRepo.queryObjects(sql, listOf(parentId), 0)) {
-            childRepo.deleteById(childRepo.getValue(child, childRepo.idField));
+            childRepo.deleteByIdValue(childRepo.getValue(child, childRepo.idField));
         }
     }
 
     // ------------------------------------------------------------------ read + relation loading
-
-    private Object findOneById(Object id, int depth) {
-        String sql = "SELECT * FROM " + model.getTableName() + " WHERE " + idField.getColumnName() + " = ?";
-        List<Object> results = queryObjects(sql, listOf(id), depth);
-        return results.isEmpty() ? null : results.get(0);
-    }
 
     /** Executes a query with this repository's mapper and resolves eager relations at {@code depth}. */
     private List<Object> queryObjects(String sql, List<Object> params, int depth) {
@@ -378,7 +737,7 @@ public final class JdbcRepository<T> implements Repository<T> {
     }
 
     private void loadToOne(Object entity, RelationModel relation, Object id, int depth) {
-        JdbcRepository<?> targetRepo = repoFor(relation.getTargetEntity());
+        JdbcRepository<?, ?> targetRepo = repoFor(relation.getTargetEntity());
         String sql = toOneSql(relation, targetRepo);
         List<Object> matches = targetRepo.queryObjects(sql, listOf(id), depth - 1);
         setValue(entity, relation.getField(), matches.isEmpty() ? null : matches.get(0));
@@ -388,7 +747,7 @@ public final class JdbcRepository<T> implements Repository<T> {
      * Builds the to-one load query: the owning side joins through its own foreign-key column, the
      * inverse side filters the target table by the owning relation's join column.
      */
-    private String toOneSql(RelationModel relation, JdbcRepository<?> targetRepo) {
+    private String toOneSql(RelationModel relation, JdbcRepository<?, ?> targetRepo) {
         if (relation.isOwningSide()) {
             return "SELECT t.* FROM " + targetRepo.model.getTableName() + " t"
                     + " JOIN " + model.getTableName() + " p ON p." + relation.getJoinColumnName()
@@ -402,7 +761,7 @@ public final class JdbcRepository<T> implements Repository<T> {
     }
 
     private void loadOneToMany(Object entity, RelationModel relation, Object id, int depth) {
-        JdbcRepository<?> targetRepo = repoFor(relation.getTargetEntity());
+        JdbcRepository<?, ?> targetRepo = repoFor(relation.getTargetEntity());
         RelationModel backRef = targetRepo.owningRelationByField(relation.getMappedBy());
         String sql = "SELECT * FROM " + targetRepo.model.getTableName()
                 + " WHERE " + backRef.getJoinColumnName() + " = ?";
@@ -411,7 +770,7 @@ public final class JdbcRepository<T> implements Repository<T> {
     }
 
     private void loadManyToMany(Object entity, RelationModel relation, Object id, int depth) {
-        JdbcRepository<?> targetRepo = repoFor(relation.getTargetEntity());
+        JdbcRepository<?, ?> targetRepo = repoFor(relation.getTargetEntity());
         String targetTable = targetRepo.model.getTableName();
         String targetId = targetRepo.idField.getColumnName();
 
@@ -425,7 +784,7 @@ public final class JdbcRepository<T> implements Repository<T> {
      * table directly; the inverse side borrows the owning relation's join table and swaps the join
      * and inverse-join columns.
      */
-    private String manyToManySql(RelationModel relation, JdbcRepository<?> targetRepo, String targetTable, String targetId) {
+    private String manyToManySql(RelationModel relation, JdbcRepository<?, ?> targetRepo, String targetTable, String targetId) {
         if (relation.isOwningSide()) {
             RelationModel.JoinTableInfo joinTable = relation.getJoinTable();
             return "SELECT t.* FROM " + targetTable + " t"
@@ -453,12 +812,12 @@ public final class JdbcRepository<T> implements Repository<T> {
                 + " (check the mappedBy reference)");
     }
 
-    private JdbcRepository<?> repoFor(Class<?> type) {
-        JdbcRepository<?> repo = registry.get(type);
+    private JdbcRepository<?, ?> repoFor(Class<?> type) {
+        JdbcRepository<?, ?> repo = registry.get(type);
         return repo != null ? repo : newRepository(type, dataSource, dialect, registry);
     }
 
-    private static <X> JdbcRepository<X> newRepository(Class<X> type, DataSource dataSource, Dialect dialect, Map<Class<?>, JdbcRepository<?>> registry) {
+    private static <X> JdbcRepository<X, Object> newRepository(Class<X> type, DataSource dataSource, Dialect dialect, Map<Class<?>, JdbcRepository<?, ?>> registry) {
         return new JdbcRepository<>(type, dataSource, dialect, registry);
     }
 
@@ -499,5 +858,76 @@ public final class JdbcRepository<T> implements Repository<T> {
         List<Object> list = new ArrayList<>(1);
         list.add(value);
         return list;
+    }
+
+    // ------------------------------------------------------------------ lifecycle (auditing / version / soft delete)
+
+    /** ANDs a "not soft-deleted" predicate onto a read condition when the entity has a soft-delete flag. */
+    private Condition withDeletedFilter(Condition where) {
+        if (!lifecycle.hasSoftDelete()) {
+            return where;
+        }
+        Condition notDeleted = Condition.eq(lifecycle.softDeleteColumn, Boolean.FALSE);
+        return where == null ? notDeleted : Condition.and(List.of(where, notDeleted));
+    }
+
+    private void applyAuditingOnInsert(Object entity) {
+        if (!lifecycle.hasAuditing()) {
+            return;
+        }
+        if (lifecycle.createdDate != null) {
+            setValue(entity, lifecycle.createdDate, temporalNow(lifecycle.createdDate));
+        }
+        if (lifecycle.lastModifiedDate != null) {
+            setValue(entity, lifecycle.lastModifiedDate, temporalNow(lifecycle.lastModifiedDate));
+        }
+        Object auditor = AuditingContext.getAuditor().orElse(null);
+        if (auditor != null) {
+            if (lifecycle.createdBy != null) {
+                setValue(entity, lifecycle.createdBy, auditor);
+            }
+            if (lifecycle.lastModifiedBy != null) {
+                setValue(entity, lifecycle.lastModifiedBy, auditor);
+            }
+        }
+    }
+
+    private void applyAuditingOnUpdate(Object entity) {
+        if (!lifecycle.hasAuditing()) {
+            return;
+        }
+        if (lifecycle.lastModifiedDate != null) {
+            setValue(entity, lifecycle.lastModifiedDate, temporalNow(lifecycle.lastModifiedDate));
+        }
+        Object auditor = AuditingContext.getAuditor().orElse(null);
+        if (auditor != null && lifecycle.lastModifiedBy != null) {
+            setValue(entity, lifecycle.lastModifiedBy, auditor);
+        }
+    }
+
+    private void initVersion(Object entity) {
+        if (lifecycle.hasVersion()) {
+            boolean wide = lifecycle.version.getType() == long.class || lifecycle.version.getType() == Long.class;
+            setValue(entity, lifecycle.version, wide ? (Object) 0L : (Object) 0);
+        }
+    }
+
+    private static Object nextVersion(Field field, Object prior) {
+        long base = prior instanceof Number number ? number.longValue() : 0L;
+        long next = base + 1;
+        boolean wide = field.getType() == long.class || field.getType() == Long.class;
+        return wide ? (Object) next : (Object) (int) next;
+    }
+
+    private static Object temporalNow(Field field) {
+        Class<?> type = field.getType();
+        if (type == Instant.class) return Instant.now();
+        if (type == LocalDateTime.class) return LocalDateTime.now();
+        if (type == LocalDate.class) return LocalDate.now();
+        if (type == LocalTime.class) return LocalTime.now();
+        if (type == OffsetDateTime.class) return OffsetDateTime.now();
+        if (type == ZonedDateTime.class) return ZonedDateTime.now();
+        if (type == long.class || type == Long.class) return System.currentTimeMillis();
+        throw new PolyDBException("Unsupported audit date type " + type.getName() + " on field " + field.getName());
     }
 }

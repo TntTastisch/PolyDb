@@ -3,11 +3,14 @@ package de.tnttastisch.polydb.examples;
 import de.tnttastisch.polydb.PolyDB;
 import de.tnttastisch.polydb.examples.entity.Post;
 import de.tnttastisch.polydb.examples.entity.User;
-import de.tnttastisch.polydb.query.Repository;
+import de.tnttastisch.polydb.examples.repository.UserRepository;
+import de.tnttastisch.polydb.query.CrudRepository;
+import de.tnttastisch.polydb.query.Sort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -34,9 +37,11 @@ public class PolyDBExampleApp {
                 .autoMigration(true) // discover and apply migrations (e.g. V1_InitialDataMigration) on start
                 .start()) {         // start() generates the schema, runs migrations, and returns the engine
 
-            // 2. Obtain a type-safe repository per entity. Each gives basic CRUD plus relation handling.
-            Repository<User> userRepository = polyDB.repository(User.class);
-            Repository<Post> postRepository = polyDB.repository(Post.class);
+            // 2. Obtain repositories. UserRepository is a user-declared interface implemented at
+            //    runtime by PolyDB (type-safe UUID id); the Post repository uses the quick per-entity
+            //    path. Both expose the full CRUD surface plus relation handling.
+            UserRepository userRepository = polyDB.getRepository(UserRepository.class);
+            CrudRepository<Post, Object> postRepository = polyDB.repository(Post.class);
 
             // 3. Build a fresh User instance in memory (not yet persisted).
             User user = new User();
@@ -51,16 +56,29 @@ public class PolyDBExampleApp {
             user.addPost(new Post(UUID.randomUUID(), "Hello PolyDB", user));
             userRepository.save(user);
 
-            // 5. Read all users back from the database.
+            // 5. The standard CRUD surface is richer now: count and existence checks come for free.
+            log.info("User count: {}, user exists: {}", userRepository.count(), userRepository.existsById(user.getId()));
+
+            // 6. Derived query methods: PolyDB generates the SQL from the method name, no body needed.
+            userRepository.findByUsername("TntTastisch")
+                    .ifPresent(u -> log.info("findByUsername -> {}", u.getEmail()));
+            log.info("findByUsernameContainingIgnoreCase('tnt') -> {} match(es)",
+                    userRepository.findByUsernameContainingIgnoreCase("tnt").size());
+
+            // 7. Sorting and pagination come for free with PagingAndSortingRepository.
+            List<User> byName = userRepository.findAll(Sort.by("username"));
+            log.info("findAll(Sort by username) -> {}", byName.stream().map(User::getUsername).toList());
+
+            // 8. Read all users back from the database.
             for (User u : userRepository.findAll()) {
                 log.info("Found user: {} ({})", u.getUsername(), u.getEmail());
             }
 
-            // 6. Read all posts. The @ManyToOne author is eagerly loaded, so getAuthor() is populated
+            // 9. Read all posts. The @ManyToOne author is eagerly loaded, so getAuthor() is populated
             //    without an extra query in the application code.
             for (Post post : postRepository.findAll()) {
                 log.info("Post '{}' by {}", post.getTitle(), post.getAuthor().getUsername());
             }
-        } // 7. close() is invoked automatically by try-with-resources, shutting PolyDB down cleanly.
+        } // 10. close() is invoked automatically by try-with-resources, shutting PolyDB down cleanly.
     }
 }
