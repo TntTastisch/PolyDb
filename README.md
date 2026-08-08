@@ -11,9 +11,11 @@ database tables.
 
 - Annotation-based entity mapping
 - Automatic schema generation
-- Repository-style CRUD access
+- Spring Data&ndash;style repositories: interface-driven CRUD, derived query methods, `@Query`,
+  pagination &amp; sorting, specifications, projections, transactions, auditing, optimistic locking
+  and soft delete (see **[REPOSITORIES.md](REPOSITORIES.md)**)
 - Database dialect support
-- Java-based migrations
+- Declarative, versioned Java migrations with dry-run and history
 - Support for multiple databases
 - Simple bootstrap API
 
@@ -320,20 +322,31 @@ per dialect. Owning `@ManyToOne(optional = false)` / `@JoinColumn(nullable = fal
 
 ## Repository API
 
-Repositories follow a Spring Data&ndash;style interface hierarchy. The root `Repository<T, ID>` is an
-empty marker carrying the entity type and its id type; `CrudRepository<T, ID>` adds the standard
-create/read/update/delete operations. You declare an interface and PolyDb synthesises the
-implementation at runtime via a dynamic proxy &mdash; no implementation class needed:
+Repositories follow a Spring Data&ndash;style interface hierarchy &mdash; declare an interface and
+PolyDb synthesises the implementation at runtime via a dynamic proxy (no implementation class needed):
+
+| Interface | Adds |
+|---|---|
+| `Repository<T, ID>` | Marker only &mdash; carries the entity type and id type. |
+| `CrudRepository<T, ID>` | Standard create/read/update/delete. |
+| `PagingAndSortingRepository<T, ID>` | `findAll(Sort)`, `findAll(Pageable)`. |
+| `SpecificationExecutor<T>` | `findAll` / `findOne` / `count` / `exists(Specification)`. |
+
+The interfaces compose, so one repository can extend several:
 
 ```java
-public interface UserRepository extends CrudRepository<User, UUID> {
+public interface UserRepository
+        extends PagingAndSortingRepository<User, UUID>, SpecificationExecutor<User> {
+
+    Optional<User> findByUsername(String username);   // derived query (see below)
 }
 
 UserRepository users = polyDB.getRepository(UserRepository.class);
 ```
 
 `default` methods on your interface run as written, so you can compose reusable helpers without an
-implementation class.
+implementation class. The sections below summarise each capability; for the complete reference see
+**[REPOSITORIES.md](REPOSITORIES.md)**.
 
 ### `CrudRepository<T, ID>`
 
@@ -375,44 +388,296 @@ CrudRepository<User, Object> users = polyDB.repository(User.class);
 
 ---
 
-## Migrations
+## Derived Query Methods
 
-PolyDb supports Java-based migrations.
-
-Example migration:
+Declare a method on your repository interface and PolyDb generates the SQL from its **name** &mdash; no
+body, no `@Query`:
 
 ```java
-package de.tnttastisch.polydb.examples.entity.migrations;
+public interface UserRepository extends CrudRepository<User, UUID> {
+    Optional<User> findByUsername(String username);
+    List<User>     findByEnabledTrueOrderByCreatedAtDesc();
+    List<User>     findByAgeGreaterThanAndUsernameContainingIgnoreCase(int age, String part);
+    List<User>     findByRoleIn(Collection<Role> roles);
+    long           countByEnabledTrue();
+    boolean        existsByEmail(String email);
+    long           deleteByEnabledFalse();
+}
+```
 
-import de.tnttastisch.polydb.migration.core.Migration;
-import de.tnttastisch.polydb.migration.core.MigrationContext;
+**Actions** (the method-name prefix): `findBy` / `readBy` / `getBy` / `queryBy` / `searchBy` (select),
+`countBy` (long/int), `existsBy` (boolean), `deleteBy` / `removeBy` (void or deleted-row count).
 
-import java.sql.Connection;
-import java.sql.Statement;
+**Return types** for finders: `List<T>`, `Optional<T>`, or a single `T`.
 
-public class V1_InitialDataMigration implements Migration {
+**Operators** (keywords appended to a property):
+
+| Category      | Keywords |
+|---------------|----------|
+| Comparison    | *(none = equals)*, `Is`, `Equals`, `Not`, `LessThan`, `LessThanEqual`, `GreaterThan`, `GreaterThanEqual`, `Between`, `Before`, `After` |
+| Strings       | `Like`, `NotLike`, `StartingWith`, `EndingWith`, `Containing`, `IgnoreCase` |
+| Collections   | `In`, `NotIn` |
+| Null / boolean| `IsNull`, `IsNotNull`, `True`, `False` |
+| Combination   | `And`, `Or` |
+| Sorting       | `OrderBy<Property>[Asc\|Desc]` (repeatable) |
+| Limiting      | `findFirst...`, `findTop<N>...` |
+
+Predicates over an owning relation are matched by their foreign key, accepting either the associated
+entity or its id (e.g. `findByAuthor(User author)` or `findByAuthor(authorId)`). Enum properties are
+compared by name. `And`/`Or`/direction keywords are recognised only at CamelCase boundaries, so
+property names like `order` or `description` are not mis-split; a property whose name literally embeds
+a keyword should use `@Query` instead.
+
+---
+
+## Sorting and Pagination
+
+Extend `PagingAndSortingRepository` for `findAll(Sort)` and `findAll(Pageable)`:
+
+```java
+List<User> byName = users.findAll(Sort.by("username"));
+List<User> newest = users.findAll(Sort.by(Direction.DESC, "createdAt"));
+
+Page<User> page = users.findAll(PageRequest.of(0, 20, Sort.by("username")));
+page.getTotalElements();  page.getTotalPages();  page.hasNext();
+```
+
+Derived methods can take a trailing `Sort` or `Pageable` and return `Page<T>` (counted),
+`Slice<T>` (uncounted, one extra-row lookahead) or `List<T>`:
+
+```java
+Page<User>  findByEnabledTrue(Pageable pageable);
+Slice<User> findByRole(Role role, Pageable pageable);
+List<User>  findByRole(Role role, Sort sort);
+```
+
+Paging falls back to primary-key order when unsorted. The row-limiting SQL is dialect-aware
+(`LIMIT`/`OFFSET`, or `OFFSET … FETCH` on SQL Server / DB2 / Firebird).
+
+---
+
+## Custom SQL: `@Query` and `@Modifying`
+
+Bind a method to explicit **native SQL** (there is no JPQL layer):
+
+```java
+@Query("SELECT * FROM users WHERE age > :min ORDER BY age")
+List<User> olderThan(@Param("min") int min);
+
+@Query("SELECT COUNT(*) FROM users WHERE enabled = true")
+long countEnabled();
+
+@Modifying
+@Query("UPDATE users SET enabled = false WHERE last_login < ?1")
+int deactivateIdle(Instant cutoff);
+```
+
+Bind markers: named `:name` (with `@Param`), positional `?1`, or sequential `?` (a PostgreSQL `::`
+cast is left untouched). Reads map to the entity, a scalar, a `List` of scalars, or a projection.
+`@Modifying` marks writes and returns the affected-row count or `void`.
+
+---
+
+## Specifications
+
+Composable, dynamic filters &mdash; PolyDb's take on JPA Criteria. Extend `SpecificationExecutor<T>`:
+
+```java
+Specification<User> adults  = root -> root.greaterThanOrEqual("age", 18);
+Specification<User> enabled = root -> root.isTrue("enabled");
+
+List<User> result = users.findAll(adults.and(enabled));
+Page<User> paged  = users.findAll(adults.or(enabled), PageRequest.of(0, 20));
+long total        = users.count(adults);
+```
+
+`Root` builds predicates over properties (`equal`, comparisons, `like`/`contains`/`startsWith`, `in`,
+`between`, null/boolean checks); combine with `and`/`or`/`not`/`allOf`/`anyOf`. A `null` specification
+(or operand) means "no restriction".
+
+---
+
+## Projections
+
+Return an interface or a record exposing a subset instead of the full entity:
+
+```java
+public interface UserView { String getUsername(); Role getRole(); }
+public record UserSummary(String username, String email) {}
+
+List<UserView>        findByEnabledTrue();              // derived
+Optional<UserSummary> findByUsername(String username);  // derived
+
+@Query("SELECT username, email FROM users WHERE age > :min")
+List<UserSummary> summaries(@Param("min") int min);     // @Query, column-reduced
+```
+
+Derived-query projections map from the loaded entity (property names match entity properties);
+`@Query` projections map from the selected columns (property names match the column labels).
+
+---
+
+## Transactions
+
+Run a unit of work atomically &mdash; cascades and bulk writes commit or roll back together:
+
+```java
+TransactionTemplate tx = new TransactionTemplate(polyDB.getDataSource());
+
+tx.executeWithoutResult(() -> {
+    accounts.save(from);
+    accounts.save(to);          // both, or neither
+});
+
+BigDecimal balance = tx.execute(() -> accounts.findById(id).orElseThrow().getBalance());
+tx.executeReadOnly(() -> accounts.count());
+```
+
+Nesting joins the outer transaction (an outer rollback also undoes inner writes).
+
+---
+
+## Auditing, Versioning &amp; Soft Delete
+
+Field annotations, applied automatically on save/delete/read:
+
+```java
+@CreatedDate       Instant createdAt;   // set on insert
+@LastModifiedDate  Instant updatedAt;   // set on insert and update
+@CreatedBy         String  createdBy;   // from AuditingContext
+@LastModifiedBy    String  updatedBy;
+@Version           long    version;     // optimistic locking
+@SoftDelete        boolean deleted;     // delete flags the row; reads hide flagged rows
+```
+
+```java
+AuditingContext.setAuditorProvider(() -> currentUser());   // for @CreatedBy / @LastModifiedBy
+
+EntityEvents.addListener(new EntityListener() {
+    @Override public void afterSave(Object entity)   { /* ... */ }
+    @Override public void afterDelete(Object entity) { /* ... */ }
+});
+```
+
+A concurrent update of a `@Version` entity raises `OptimisticLockException`. A `@SoftDelete` flag makes
+`delete` set the flag and every read filter it out (the row stays in the table). Domain events fire
+after save and delete.
+
+---
+
+## Migrations
+
+Automatic schema sync and versioned migrations share **one internal engine**. Both produce a list of
+dialect-independent `MigrationOperation`s (create table, add column, add foreign key, insert data, …)
+which a single `MigrationExecutor` renders to SQL through the active `Dialect` and applies. You never
+have to write dialect-specific SQL by hand.
+
+Migrations are scanned automatically from the `.migrations` sub-package of your entity package and
+applied once each, in ascending version order, tracked in the `polydb_schema_history` table. Versions
+are compared **as strings**, so zero-pad (`"001"`) or use sortable timestamps (`"20260808_1200"`) —
+`"10"` sorts before `"9"`.
+
+### Declarative migrations (recommended)
+
+Extend `BaseMigration` and describe the change in `up(...)` with the fluent `MigrationBuilder`:
+
+```java
+import de.tnttastisch.polydb.migration.core.BaseMigration;
+import de.tnttastisch.polydb.migration.plan.MigrationBuilder;
+
+import static de.tnttastisch.polydb.migration.plan.MigrationBuilder.row;
+import static de.tnttastisch.polydb.migration.precondition.Preconditions.ifTableMissing;
+
+public class V2_UserProfiles extends BaseMigration {
+
+    public String getVersion()     { return "20260808_1200"; }
+    public String getDescription() { return "profiles table + default roles"; }
 
     @Override
-    public String getVersion() {
-        return "1";
+    public void up(MigrationBuilder m) {
+        m.preconditions(ifTableMissing("profiles"));          // robust against legacy databases
+
+        m.createTable("profiles", t -> {
+            t.uuidPrimaryKey("id");                           // reusable column helpers
+            t.column("user_id", java.util.UUID.class).notNull();
+            t.string("bio", 500).nullable();
+            t.timestamps();                                   // created_at / updated_at
+            t.softDelete();                                   // deleted_at
+        });
+        m.addForeignKey("profiles", "user_id", "users", "id");
+        m.createIndex("profiles", "user_id").unique();
+
+        m.seed("roles")                                       // declarative seed data
+         .insert(row("id", 1, "name", "ADMIN"))
+         .upsert("id", row("id", 2, "name", "USER"));
     }
+    // down() is optional — reversible operations (create table/column/index, add FK) roll back
+    // automatically. Override down(MigrationBuilder) only for irreversible steps.
+}
+```
 
-    @Override
-    public String getDescription() {
-        return "Inserts initial system user";
-    }
+Available builder operations include `createTable` / `dropTable` / `renameTable`,
+`addColumn` / `dropColumn` / `renameColumn` / `alterColumn`, `createIndex` / `dropIndex`,
+`addForeignKey` / `dropForeignKey`, the `seed(...)` API (`insert` / `update` / `delete` / `upsert`),
+column helpers (`timestamps()`, `softDelete()`, `auditColumns()`, `uuidPrimaryKey()`), and an
+`sql(...)` escape hatch for anything the DSL cannot express.
 
-    @Override
+### Rollback and transactions
+
+Every reversible operation knows its inverse (`CreateTable → DropTable`, `AddColumn → DropColumn`, …).
+Where the dialect supports **transactional DDL** (PostgreSQL, SQLite, SQL Server, Firebird, DB2) a
+whole migration runs in one transaction and is rolled back on failure. Where it does not (H2, MySQL,
+MariaDB, Oracle, which implicitly commit DDL) the engine applies operations one by one and, on failure,
+runs each applied operation's reverse as best-effort compensation.
+
+### Dry run and SQL preview
+
+```java
+PolyDB.builder()
+    .url("jdbc:postgresql://…")
+    .entityPackage("com.example.entity")
+    .dryRun(true)   // compute plans and log the SQL — apply nothing
+    .start();
+```
+
+`ExecutionMode.DRY_RUN` / `PREVIEW` compute the full plan and render its SQL without changing the
+database; the resulting `SqlScript` can be written to a `.sql` file.
+
+### Preconditions
+
+`ifTableExists` / `ifTableMissing` / `ifColumnExists` / `ifColumnMissing` / `ifIndexExists` guard a
+migration; if any is unmet the migration is skipped (not failed), which keeps it safe to run against
+legacy databases.
+
+### History metadata
+
+`polydb_schema_history` records, per version, the description, class name, type (`MANUAL` / `LEGACY`),
+a content **checksum**, the PolyDB version, execution time, status and any error message. The table is
+upgraded in place (new columns added additively) so existing history is preserved.
+
+### Legacy migrations
+
+Migrations that implement `Migration` directly and write raw SQL via `MigrationContext` remain fully
+supported (they run through the same executor, gaining history + metadata, but cannot be previewed or
+dry-run):
+
+```java
+public class V0_Legacy implements Migration {
+    public String getVersion()     { return "0"; }
+    public String getDescription() { return "raw sql"; }
     public void migrate(MigrationContext context) throws Exception {
-        try (Connection conn = context.getDataSource().getConnection();
-             Statement stmt = conn.createStatement()) {
-            stmt.execute("INSERT INTO users (id, username, email, created_at) VALUES ('00000000-0000-0000-0000-000000000000', 'SYSTEM', 'system@polydb.org', NOW())");
+        try (var conn = context.getConnection(); var stmt = conn.createStatement()) {
+            stmt.execute("INSERT INTO users (id, username) VALUES ('…', 'SYSTEM')");
         }
     }
 }
 ```
 
-Migrations are scanned automatically from the `.migrations` package inside your entity package.
+### Generating migrations from entity changes
+
+`MigrationCodeGenerator` turns the schema comparator's plan (the diff between your entities and the
+live database) into a `BaseMigration` source file, so production systems can run migrations only, with
+automatic schema changes turned off (`autoMigration(false)`).
 
 ---
 
