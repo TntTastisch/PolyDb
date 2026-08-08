@@ -2,6 +2,7 @@ package de.tnttastisch.polydb.query;
 
 import de.tnttastisch.polydb.core.annotations.CascadeType;
 import de.tnttastisch.polydb.core.annotations.FetchType;
+import de.tnttastisch.polydb.core.exception.OptimisticLockException;
 import de.tnttastisch.polydb.core.exception.PolyDBException;
 import de.tnttastisch.polydb.dialect.Dialect;
 import de.tnttastisch.polydb.query.sql.Condition;
@@ -14,6 +15,12 @@ import de.tnttastisch.polydb.schema.parser.EntityParser;
 
 import javax.sql.DataSource;
 import java.lang.reflect.Field;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.OffsetDateTime;
+import java.time.ZonedDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -50,6 +57,7 @@ public final class JdbcRepository<T, ID> implements PagingAndSortingRepository<T
     private final DefaultResultMapper<T> mapper;
     private final EntityModel model;
     private final FieldModel idField;
+    private final LifecycleMetadata lifecycle;
     private final Map<Class<?>, JdbcRepository<?, ?>> registry;
 
     public JdbcRepository(Class<T> entityClass, DataSource dataSource, Dialect dialect) {
@@ -67,6 +75,7 @@ public final class JdbcRepository<T, ID> implements PagingAndSortingRepository<T
                 .filter(FieldModel::isId)
                 .findFirst()
                 .orElseThrow(() -> new PolyDBException("Entity " + entityClass.getName() + " has no @Id field"));
+        this.lifecycle = LifecycleMetadata.of(entityClass, model);
         this.registry = registry;
         registry.put(entityClass, this);
     }
@@ -204,6 +213,7 @@ public final class JdbcRepository<T, ID> implements PagingAndSortingRepository<T
     @Override
     public void delete(T entity) {
         deleteByIdValue(getValue(entity, idField));
+        EntityEvents.fireAfterDelete(entity);
     }
 
     @Override
@@ -222,6 +232,7 @@ public final class JdbcRepository<T, ID> implements PagingAndSortingRepository<T
     public void deleteAll(Iterable<? extends T> entities) {
         for (T entity : entities) {
             deleteByIdValue(getValue(entity, idField));
+            EntityEvents.fireAfterDelete(entity);
         }
     }
 
@@ -254,7 +265,7 @@ public final class JdbcRepository<T, ID> implements PagingAndSortingRepository<T
     @SuppressWarnings("unchecked")
     public List<T> findWhere(Condition where, List<Order> orders, Long limit, Long offset) {
         SqlBuilder builder = SqlBuilder.from(model.getTableName())
-                .where(where)
+                .where(withDeletedFilter(where))
                 .orderBy(orders)
                 .limit(limit)
                 .offset(offset);
@@ -268,7 +279,7 @@ public final class JdbcRepository<T, ID> implements PagingAndSortingRepository<T
      * @return the number of matching rows
      */
     public long countWhere(Condition where) {
-        SqlBuilder builder = SqlBuilder.from(model.getTableName()).where(where);
+        SqlBuilder builder = SqlBuilder.from(model.getTableName()).where(withDeletedFilter(where));
         List<Long> result = executor.executeQuery(builder.toCountSql(), builder.parameters(), rs -> rs.getLong(1));
         return result.isEmpty() ? 0L : result.get(0);
     }
@@ -292,7 +303,7 @@ public final class JdbcRepository<T, ID> implements PagingAndSortingRepository<T
      * @return the number of rows deleted
      */
     public long deleteWhere(Condition where) {
-        SqlBuilder builder = SqlBuilder.from(model.getTableName()).where(where);
+        SqlBuilder builder = SqlBuilder.from(model.getTableName()).where(withDeletedFilter(where));
         List<Object> matches = queryObjects(builder.toSelectSql(dialect), builder.parameters(), 0);
         for (Object entity : matches) {
             deleteByIdValue(getValue(entity, idField));
@@ -425,18 +436,27 @@ public final class JdbcRepository<T, ID> implements PagingAndSortingRepository<T
         }
         try {
             Object id = getValue(entity, idField);
-            if (id != null && existsWhere(Condition.eq(idField.getColumnName(), id))) {
+            if (id != null && rowExists(id)) {
                 update(entity);
-                return;
+            } else {
+                insert(entity);
             }
-
-            insert(entity);
+            EntityEvents.fireAfterSave(entity);
         } finally {
             inFlight.remove(entity);
         }
     }
 
+    /** Raw existence check for the upsert decision; ignores the soft-delete filter so a soft-deleted row still updates. */
+    private boolean rowExists(Object id) {
+        SqlBuilder builder = SqlBuilder.from(model.getTableName()).where(Condition.eq(idField.getColumnName(), id));
+        List<Long> result = executor.executeQuery(builder.toCountSql(), builder.parameters(), rs -> rs.getLong(1));
+        return !result.isEmpty() && result.get(0) > 0;
+    }
+
     private void insert(Object entity) {
+        applyAuditingOnInsert(entity);
+        initVersion(entity);
         cascadeSaveOwning(entity, false);
 
         List<FieldModel> columns = model.getFields().stream()
@@ -454,7 +474,14 @@ public final class JdbcRepository<T, ID> implements PagingAndSortingRepository<T
     }
 
     private void update(Object entity) {
+        applyAuditingOnUpdate(entity);
         cascadeSaveOwning(entity, true);
+
+        Object priorVersion = null;
+        if (lifecycle.hasVersion()) {
+            priorVersion = getValue(entity, lifecycle.version);
+            setValue(entity, lifecycle.version, nextVersion(lifecycle.version, priorVersion));
+        }
 
         List<FieldModel> columns = model.getFields().stream()
                 .filter(field -> !field.isId())
@@ -463,14 +490,25 @@ public final class JdbcRepository<T, ID> implements PagingAndSortingRepository<T
         String setClause = columns.stream()
                 .map(field -> field.getColumnName() + " = ?")
                 .collect(Collectors.joining(", "));
-        String sql = "UPDATE " + model.getTableName() + " SET " + setClause
-                + " WHERE " + idField.getColumnName() + " = ?";
+        StringBuilder sql = new StringBuilder("UPDATE ").append(model.getTableName())
+                .append(" SET ").append(setClause)
+                .append(" WHERE ").append(idField.getColumnName()).append(" = ?");
 
         List<Object> values = columns.stream()
                 .map(field -> valueForColumn(entity, field))
                 .collect(Collectors.toCollection(ArrayList::new));
         values.add(getValue(entity, idField));
-        executor.executeUpdate(sql, values);
+        if (lifecycle.hasVersion()) {
+            sql.append(" AND ").append(lifecycle.versionColumn).append(" = ?");
+            values.add(priorVersion);
+        }
+
+        int affected = executor.executeUpdate(sql.toString(), values);
+        if (lifecycle.hasVersion() && affected == 0) {
+            setValue(entity, lifecycle.version, priorVersion);
+            throw new OptimisticLockException("Concurrent update of " + entityClass.getSimpleName()
+                    + " id=" + getValue(entity, idField) + " (expected version " + priorVersion + ")");
+        }
 
         cascadeSaveInverse(entity, true);
     }
@@ -609,6 +647,12 @@ public final class JdbcRepository<T, ID> implements PagingAndSortingRepository<T
 
     private void deleteByIdValue(Object id) {
         if (id == null) {
+            return;
+        }
+        if (lifecycle.hasSoftDelete()) {
+            // Soft delete: flag the row instead of removing it (no cascade to children).
+            executor.executeUpdate("UPDATE " + model.getTableName() + " SET " + lifecycle.softDeleteColumn
+                    + " = ? WHERE " + idField.getColumnName() + " = ?", List.of(Boolean.TRUE, id));
             return;
         }
         Set<String> deleting = DELETING.get();
@@ -814,5 +858,76 @@ public final class JdbcRepository<T, ID> implements PagingAndSortingRepository<T
         List<Object> list = new ArrayList<>(1);
         list.add(value);
         return list;
+    }
+
+    // ------------------------------------------------------------------ lifecycle (auditing / version / soft delete)
+
+    /** ANDs a "not soft-deleted" predicate onto a read condition when the entity has a soft-delete flag. */
+    private Condition withDeletedFilter(Condition where) {
+        if (!lifecycle.hasSoftDelete()) {
+            return where;
+        }
+        Condition notDeleted = Condition.eq(lifecycle.softDeleteColumn, Boolean.FALSE);
+        return where == null ? notDeleted : Condition.and(List.of(where, notDeleted));
+    }
+
+    private void applyAuditingOnInsert(Object entity) {
+        if (!lifecycle.hasAuditing()) {
+            return;
+        }
+        if (lifecycle.createdDate != null) {
+            setValue(entity, lifecycle.createdDate, temporalNow(lifecycle.createdDate));
+        }
+        if (lifecycle.lastModifiedDate != null) {
+            setValue(entity, lifecycle.lastModifiedDate, temporalNow(lifecycle.lastModifiedDate));
+        }
+        Object auditor = AuditingContext.getAuditor().orElse(null);
+        if (auditor != null) {
+            if (lifecycle.createdBy != null) {
+                setValue(entity, lifecycle.createdBy, auditor);
+            }
+            if (lifecycle.lastModifiedBy != null) {
+                setValue(entity, lifecycle.lastModifiedBy, auditor);
+            }
+        }
+    }
+
+    private void applyAuditingOnUpdate(Object entity) {
+        if (!lifecycle.hasAuditing()) {
+            return;
+        }
+        if (lifecycle.lastModifiedDate != null) {
+            setValue(entity, lifecycle.lastModifiedDate, temporalNow(lifecycle.lastModifiedDate));
+        }
+        Object auditor = AuditingContext.getAuditor().orElse(null);
+        if (auditor != null && lifecycle.lastModifiedBy != null) {
+            setValue(entity, lifecycle.lastModifiedBy, auditor);
+        }
+    }
+
+    private void initVersion(Object entity) {
+        if (lifecycle.hasVersion()) {
+            boolean wide = lifecycle.version.getType() == long.class || lifecycle.version.getType() == Long.class;
+            setValue(entity, lifecycle.version, wide ? (Object) 0L : (Object) 0);
+        }
+    }
+
+    private static Object nextVersion(Field field, Object prior) {
+        long base = prior instanceof Number number ? number.longValue() : 0L;
+        long next = base + 1;
+        boolean wide = field.getType() == long.class || field.getType() == Long.class;
+        return wide ? (Object) next : (Object) (int) next;
+    }
+
+    private static Object temporalNow(Field field) {
+        Class<?> type = field.getType();
+        if (type == Instant.class) return Instant.now();
+        if (type == LocalDateTime.class) return LocalDateTime.now();
+        if (type == LocalDate.class) return LocalDate.now();
+        if (type == LocalTime.class) return LocalTime.now();
+        if (type == OffsetDateTime.class) return OffsetDateTime.now();
+        if (type == ZonedDateTime.class) return ZonedDateTime.now();
+        if (type == long.class || type == Long.class) return System.currentTimeMillis();
+        throw new PolyDBException("Unsupported audit date type " + type.getName() + " on field " + field.getName());
     }
 }
