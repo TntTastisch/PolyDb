@@ -315,6 +315,44 @@ public final class JdbcRepository<T, ID> implements PagingAndSortingRepository<T
         return value instanceof Enum<?> e ? e.name() : value;
     }
 
+    // ------------------------------------------------------------------ raw SQL (@Query SPI)
+
+    /**
+     * Runs a raw SQL {@code SELECT}, mapping each row to this entity and resolving eager relations one
+     * level deep. Used to back {@code @Query} methods that return the entity type.
+     *
+     * @param sql    the SQL, with {@code ?} placeholders
+     * @param params the positional bind values
+     * @return the mapped entities
+     */
+    @SuppressWarnings("unchecked")
+    public List<T> query(String sql, List<Object> params) {
+        return (List<T>) (List<?>) queryObjects(sql, params, DEFAULT_DEPTH);
+    }
+
+    /**
+     * Runs a raw SQL {@code SELECT} and returns the first column of every row, for scalar or aggregate
+     * {@code @Query} projections (e.g. {@code SELECT COUNT(*)} or {@code SELECT name}).
+     *
+     * @param sql    the SQL, with {@code ?} placeholders
+     * @param params the positional bind values
+     * @return the first-column values, one per row
+     */
+    public List<Object> queryScalarColumn(String sql, List<Object> params) {
+        return executor.executeQuery(sql, params, rs -> rs.getObject(1));
+    }
+
+    /**
+     * Runs a raw {@code INSERT}/{@code UPDATE}/{@code DELETE}. Backs {@code @Modifying @Query} methods.
+     *
+     * @param sql    the SQL, with {@code ?} placeholders
+     * @param params the positional bind values
+     * @return the number of affected rows
+     */
+    public int executeUpdate(String sql, List<Object> params) {
+        return executor.executeUpdate(sql, params);
+    }
+
     // ------------------------------------------------------------------ write
 
     private void doSave(Object entity) {

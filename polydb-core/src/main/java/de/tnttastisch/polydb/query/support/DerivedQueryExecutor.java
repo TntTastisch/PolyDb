@@ -35,14 +35,21 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class DerivedQueryExecutor implements QueryMethodExecutor {
 
     private final JdbcRepository<?, ?> repository;
+    private final AnnotationQueryExecutor annotationExecutor;
     private final Map<Method, DerivedQuery> cache = new ConcurrentHashMap<>();
 
     public DerivedQueryExecutor(JdbcRepository<?, ?> repository) {
         this.repository = repository;
+        this.annotationExecutor = new AnnotationQueryExecutor(repository);
     }
 
     @Override
     public Object execute(Method method, Object[] args) {
+        // A method carrying @Query runs its explicit SQL; everything else is derived from the name.
+        if (AnnotationQueryExecutor.handles(method)) {
+            return annotationExecutor.execute(method, args);
+        }
+
         DerivedQuery query = cache.computeIfAbsent(method, m -> DerivedQuery.parse(m.getName()));
         Object[] arguments = args == null ? new Object[0] : args;
 
