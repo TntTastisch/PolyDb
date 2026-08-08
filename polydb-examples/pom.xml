@@ -8,11 +8,15 @@
     <parent>
         <groupId>de.tnttastisch</groupId>
         <artifactId>polydb</artifactId>
-        <version>0.1.5-DEV</version>
+        <version>0.2.0-DEV</version>
     </parent>
 
     <artifactId>polydb-examples</artifactId>
     <name>PolyDB :: Examples</name>
+
+    <properties>
+        <maven.deploy.skip>true</maven.deploy.skip>
+    </properties>
 
     <dependencies>
         <dependency>
