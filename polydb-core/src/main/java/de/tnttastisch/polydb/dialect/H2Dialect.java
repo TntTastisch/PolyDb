@@ -57,4 +57,13 @@ public class H2Dialect extends AbstractSqlDialect {
         return "ALTER TABLE " + tableName + " ALTER COLUMN " + field.getColumnName() + " " + getSqlType(field) +
                 (field.isNullable() ? "" : " NOT NULL");
     }
+
+    /**
+     * H2 performs an implicit commit around DDL statements, so a whole migration cannot be rolled back
+     * as one transaction; the engine falls back to per-operation compensation on failure.
+     */
+    @Override
+    public boolean supportsTransactionalDdl() {
+        return false;
+    }
 }

@@ -7,16 +7,19 @@ import de.tnttastisch.polydb.core.exception.PolyDBException;
 import de.tnttastisch.polydb.dialect.*;
 import de.tnttastisch.polydb.migration.core.MigrationContext;
 import de.tnttastisch.polydb.migration.core.MigrationRunner;
+import de.tnttastisch.polydb.migration.executor.ExecutionResult;
+import de.tnttastisch.polydb.migration.executor.MigrationExecutor;
+import de.tnttastisch.polydb.migration.operation.MigrationOperation;
+import de.tnttastisch.polydb.migration.plan.ExecutionMode;
+import de.tnttastisch.polydb.migration.plan.MigrationPlan;
 import de.tnttastisch.polydb.query.CrudRepository;
 import de.tnttastisch.polydb.query.JdbcRepository;
 import de.tnttastisch.polydb.query.Repository;
 import de.tnttastisch.polydb.query.support.DerivedQueryExecutor;
 import de.tnttastisch.polydb.query.support.RepositoryFactory;
-import de.tnttastisch.polydb.schema.comparison.SchemaChange;
 import de.tnttastisch.polydb.schema.comparison.SchemaComparator;
 import de.tnttastisch.polydb.schema.db.DatabaseSchema;
 import de.tnttastisch.polydb.schema.db.DatabaseSchemaReader;
-import de.tnttastisch.polydb.schema.generator.SchemaGenerator;
 import de.tnttastisch.polydb.schema.model.EntityModel;
 import de.tnttastisch.polydb.schema.parser.EntityParser;
 import org.slf4j.Logger;
@@ -24,7 +27,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
-import java.sql.Statement;
 import java.util.List;
 
 /**
@@ -202,6 +204,12 @@ public class PolyDB implements AutoCloseable {
             return this;
         }
 
+        /** Enables dry-run mode: schema/migration plans and SQL are logged, but nothing is applied. */
+        public Builder dryRun(boolean dryRun) {
+            configBuilder.dryRun(dryRun);
+            return this;
+        }
+
         /** Builds the configuration and {@linkplain PolyDB#start(PolyDBConfig) starts} a ready-to-use instance. */
         public PolyDB start() {
             return PolyDB.start(configBuilder.build());
@@ -231,23 +239,20 @@ public class PolyDB implements AutoCloseable {
             DatabaseSchema dbSchema = reader.readSchema(conn);
 
             SchemaComparator comparator = new SchemaComparator();
-            List<SchemaChange> changes = comparator.compare(entities, dbSchema);
+            List<MigrationOperation> operations = comparator.compare(entities, dbSchema);
 
-            if (changes.isEmpty()) {
+            if (operations.isEmpty()) {
                 log.info("Schema is up to date");
-                runMigrations();
-                return;
-            }
-
-            log.info("Detected {} schema changes, applying...", changes.size());
-            // Translate the dialect-agnostic changes into concrete DDL and apply them sequentially.
-            SchemaGenerator generator = new SchemaGenerator(dialect);
-            List<String> sqls = generator.generateSql(changes);
-
-            try (Statement stmt = conn.createStatement()) {
-                for (String sql : sqls) {
-                    log.debug("Executing: {}", sql);
-                    stmt.execute(sql);
+            } else {
+                // The comparator emits the same operation model as manual migrations, so auto-sync flows
+                // through the shared executor: one path to the database, with transactional application.
+                MigrationPlan plan = new MigrationPlan(operations);
+                MigrationExecutor executor = new MigrationExecutor(dialect);
+                ExecutionMode mode = config.isDryRun() ? ExecutionMode.DRY_RUN : ExecutionMode.EXECUTE;
+                log.info("Detected {} schema change(s) [{}]", operations.size(), mode);
+                ExecutionResult result = executor.run(plan, conn, mode);
+                if (mode != ExecutionMode.EXECUTE) {
+                    log.info("Dry-run schema plan:\n{}\n\nSQL:\n{}", plan.describe(), result.getSql());
                 }
             }
         } catch (Exception e) {
@@ -262,7 +267,8 @@ public class PolyDB implements AutoCloseable {
     private void runMigrations() {
         MigrationContext migrationContext = new MigrationContext(dataSource, dialect);
         MigrationRunner migrationRunner = new MigrationRunner(migrationContext);
-        migrationRunner.run(config.getEntityPackage() + ".migrations");
+        ExecutionMode mode = config.isDryRun() ? ExecutionMode.DRY_RUN : ExecutionMode.EXECUTE;
+        migrationRunner.run(config.getEntityPackage() + ".migrations", mode);
 
         log.info("PolyDB is ready");
     }

@@ -6,13 +6,14 @@ import de.tnttastisch.polydb.core.annotations.Id;
 import de.tnttastisch.polydb.core.annotations.JoinColumn;
 import de.tnttastisch.polydb.core.annotations.ManyToOne;
 import de.tnttastisch.polydb.core.annotations.Table;
+import de.tnttastisch.polydb.migration.operation.AddForeignKeyOperation;
+import de.tnttastisch.polydb.migration.operation.CreateTableOperation;
+import de.tnttastisch.polydb.migration.operation.MigrationOperation;
 import de.tnttastisch.polydb.schema.db.ColumnSchema;
 import de.tnttastisch.polydb.schema.db.DatabaseSchema;
 import de.tnttastisch.polydb.schema.db.TableSchema;
 import de.tnttastisch.polydb.schema.model.EntityModel;
 import de.tnttastisch.polydb.schema.parser.EntityParser;
-import de.tnttastisch.polydb.testentities.Author;
-import de.tnttastisch.polydb.testentities.Book;
 import org.junit.jupiter.api.Test;
 
 import java.sql.Types;
@@ -23,10 +24,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Verifies {@link SchemaComparator}: it diffs the desired entity models against the current
- * {@link DatabaseSchema} and emits ordered {@link SchemaChange}s. Focus areas are dependency-aware
- * table ordering, when foreign keys are inlined into {@code CREATE TABLE} versus deferred to a
- * separate {@code ADD FOREIGN KEY}, and adding missing constraints to pre-existing tables. Uses the
- * {@link Author}/{@link Book} fixtures for the acyclic case and inline {@code NodeA/B/C} fixtures to
+ * {@link DatabaseSchema} and emits ordered {@link MigrationOperation}s. Focus areas are dependency-aware
+ * table ordering, when foreign keys are inlined into {@code CreateTableOperation} versus deferred to a
+ * separate {@code AddForeignKeyOperation}, and adding missing constraints to pre-existing tables. Uses
+ * the {@code Author}/{@code Book} fixtures for the acyclic case and inline {@code NodeA/B/C} fixtures to
  * construct a dependency cycle.
  */
 class SchemaComparatorTest {
@@ -34,105 +35,86 @@ class SchemaComparatorTest {
     private final EntityParser parser = new EntityParser();
     private final SchemaComparator comparator = new SchemaComparator();
 
-    /**
-     * Against an empty database the comparator orders {@code CREATE TABLE}s by dependency (the
-     * referenced {@code authors} before the referencing {@code books}) even when the entities are
-     * supplied in the wrong order, and because the graph is acyclic it inlines the foreign key rather
-     * than deferring any to {@code ADD FOREIGN KEY}.
-     */
     @Test
     void createsReferencedTableBeforeReferencingTableWithInlineForeignKey() {
-        EntityModel author = parser.parseEntity(Author.class);
-        EntityModel book = parser.parseEntity(Book.class);
+        EntityModel author = parser.parseEntity(de.tnttastisch.polydb.testentities.Author.class);
+        EntityModel book = parser.parseEntity(de.tnttastisch.polydb.testentities.Book.class);
 
         // Declared "wrong" order on purpose: the comparator must reorder by dependency.
-        List<SchemaChange> changes = comparator.compare(List.of(book, author), new DatabaseSchema());
+        List<MigrationOperation> changes = comparator.compare(List.of(book, author), new DatabaseSchema());
 
         List<String> createdTables = changes.stream()
-                .filter(c -> c instanceof SchemaChange.CreateTable)
-                .map(c -> ((SchemaChange.CreateTable) c).getEntity().getTableName())
+                .filter(c -> c instanceof CreateTableOperation)
+                .map(c -> ((CreateTableOperation) c).tableName())
                 .toList();
         assertThat(createdTables).containsExactly("authors", "books");
 
-        SchemaChange.CreateTable booksCreate = changes.stream()
-                .filter(c -> c instanceof SchemaChange.CreateTable)
-                .map(c -> (SchemaChange.CreateTable) c)
-                .filter(c -> c.getEntity().getTableName().equals("books"))
+        CreateTableOperation booksCreate = changes.stream()
+                .filter(c -> c instanceof CreateTableOperation)
+                .map(c -> (CreateTableOperation) c)
+                .filter(c -> c.tableName().equals("books"))
                 .findFirst()
                 .orElseThrow();
-        assertThat(booksCreate.getInlineForeignKeys()).hasSize(1);
+        assertThat(booksCreate.inlineForeignKeys()).hasSize(1);
 
         // Acyclic graph -> foreign keys are inlined, none deferred to ALTER.
-        assertThat(changes).noneMatch(c -> c instanceof SchemaChange.AddForeignKey);
+        assertThat(changes).noneMatch(c -> c instanceof AddForeignKeyOperation);
     }
 
-    /**
-     * When both tables already exist but the {@code books} table lacks its foreign key, the comparator
-     * emits no {@code CREATE TABLE} and instead a single {@code ADD FOREIGN KEY} carrying the correct
-     * table, column, referenced table and deterministic constraint name.
-     */
     @Test
     void addsForeignKeyToExistingTableMissingTheConstraint() {
-        EntityModel author = parser.parseEntity(Author.class);
-        EntityModel book = parser.parseEntity(Book.class);
+        EntityModel author = parser.parseEntity(de.tnttastisch.polydb.testentities.Author.class);
+        EntityModel book = parser.parseEntity(de.tnttastisch.polydb.testentities.Book.class);
 
         DatabaseSchema dbSchema = new DatabaseSchema();
         dbSchema.addTable(existingAuthorsTable());
         dbSchema.addTable(existingBooksTableWithoutForeignKey());
 
-        List<SchemaChange> changes = comparator.compare(List.of(book, author), dbSchema);
+        List<MigrationOperation> changes = comparator.compare(List.of(book, author), dbSchema);
 
-        assertThat(changes).noneMatch(c -> c instanceof SchemaChange.CreateTable);
-        SchemaChange.AddForeignKey fk = changes.stream()
-                .filter(c -> c instanceof SchemaChange.AddForeignKey)
-                .map(c -> (SchemaChange.AddForeignKey) c)
+        assertThat(changes).noneMatch(c -> c instanceof CreateTableOperation);
+        AddForeignKeyOperation fk = changes.stream()
+                .filter(c -> c instanceof AddForeignKeyOperation)
+                .map(c -> (AddForeignKeyOperation) c)
                 .findFirst()
                 .orElseThrow();
-        assertThat(fk.getTableName()).isEqualTo("books");
-        assertThat(fk.getColumn()).isEqualTo("author_id");
-        assertThat(fk.getReferencedTable()).isEqualTo("authors");
-        assertThat(fk.getConstraintName()).isEqualTo("fk_books_author_id");
+        assertThat(fk.tableName()).isEqualTo("books");
+        assertThat(fk.column()).isEqualTo("author_id");
+        assertThat(fk.referencedTable()).isEqualTo("authors");
+        assertThat(fk.constraintName()).isEqualTo("fk_books_author_id");
     }
 
-    /**
-     * With a dependency cycle ({@code a <-> b}) plus an acyclic edge ({@code c -> a}), the comparator
-     * still orders {@code a} before its acyclic dependent {@code c} and inlines the satisfiable
-     * {@code c -> a} foreign key, while deferring exactly one foreign key (the one that closes the
-     * {@code a <-> b} cycle) to a separate {@code ADD FOREIGN KEY}.
-     */
     @Test
     void cyclicDependencyDefersOnlyTheCycleClosingForeignKeyAndInlinesAcyclicOnes() {
-        // a <-> b form a cycle; c -> a is acyclic. Declared order c, a, b deliberately puts the
-        // acyclic dependent first to ensure ordering does not strand its (satisfiable) foreign key.
         EntityModel a = parser.parseEntity(NodeA.class);
         EntityModel b = parser.parseEntity(NodeB.class);
         EntityModel c = parser.parseEntity(NodeC.class);
 
-        List<SchemaChange> changes = comparator.compare(List.of(c, a, b), new DatabaseSchema());
+        List<MigrationOperation> changes = comparator.compare(List.of(c, a, b), new DatabaseSchema());
 
         List<String> createOrder = changes.stream()
-                .filter(ch -> ch instanceof SchemaChange.CreateTable)
-                .map(ch -> ((SchemaChange.CreateTable) ch).getEntity().getTableName())
+                .filter(ch -> ch instanceof CreateTableOperation)
+                .map(ch -> ((CreateTableOperation) ch).tableName())
                 .toList();
         // The referenced table "a" must be created before its acyclic dependent "c".
         assertThat(createOrder.indexOf("a")).isLessThan(createOrder.indexOf("c"));
 
         // The acyclic c -> a foreign key is inlined, not deferred.
-        SchemaChange.CreateTable cCreate = changes.stream()
-                .filter(ch -> ch instanceof SchemaChange.CreateTable)
-                .map(ch -> (SchemaChange.CreateTable) ch)
-                .filter(ch -> ch.getEntity().getTableName().equals("c"))
+        CreateTableOperation cCreate = changes.stream()
+                .filter(ch -> ch instanceof CreateTableOperation)
+                .map(ch -> (CreateTableOperation) ch)
+                .filter(ch -> ch.tableName().equals("c"))
                 .findFirst()
                 .orElseThrow();
-        assertThat(cCreate.getInlineForeignKeys()).hasSize(1);
+        assertThat(cCreate.inlineForeignKeys()).hasSize(1);
 
         // Exactly one foreign key is deferred to ALTER: the one that closes the a <-> b cycle.
-        List<SchemaChange.AddForeignKey> deferred = changes.stream()
-                .filter(ch -> ch instanceof SchemaChange.AddForeignKey)
-                .map(ch -> (SchemaChange.AddForeignKey) ch)
+        List<AddForeignKeyOperation> deferred = changes.stream()
+                .filter(ch -> ch instanceof AddForeignKeyOperation)
+                .map(ch -> (AddForeignKeyOperation) ch)
                 .toList();
         assertThat(deferred).hasSize(1);
-        assertThat(deferred.get(0).getColumn()).isIn("a_id", "b_id");
+        assertThat(deferred.get(0).column()).isIn("a_id", "b_id");
     }
 
     /** Builds the current-schema representation of an already-migrated {@code authors} table. */

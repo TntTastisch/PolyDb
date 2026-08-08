@@ -65,4 +65,10 @@ public class OracleDialect extends AbstractSqlDialect {
     public String getDropColumnSql(String tableName, String columnName) {
         return "ALTER TABLE " + tableName + " DROP COLUMN " + columnName;
     }
+
+    /** Oracle implicitly commits each DDL statement, so a migration cannot be rolled back as a unit. */
+    @Override
+    public boolean supportsTransactionalDdl() {
+        return false;
+    }
 }

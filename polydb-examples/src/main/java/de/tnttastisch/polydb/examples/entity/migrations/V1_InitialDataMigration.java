@@ -1,24 +1,26 @@
 package de.tnttastisch.polydb.examples.entity.migrations;
 
-import de.tnttastisch.polydb.migration.core.Migration;
-import de.tnttastisch.polydb.migration.core.MigrationContext;
+import de.tnttastisch.polydb.migration.core.BaseMigration;
+import de.tnttastisch.polydb.migration.plan.MigrationBuilder;
 
-import java.sql.Connection;
-import java.sql.Statement;
+import java.time.LocalDateTime;
+import java.util.UUID;
+
+import static de.tnttastisch.polydb.migration.plan.MigrationBuilder.row;
 
 /**
- * Example migration that seeds initial data.
+ * Example migration that seeds initial data, written against the declarative migration API.
  *
- * <p>A migration is a versioned, ordered unit of work PolyDB runs once against the database (it
- * implements {@link Migration} and is discovered/applied during start-up). Schema generation creates
- * the tables from the entity definitions; migrations like this one then run on top of that schema to
- * insert or transform data. PolyDB orders migrations by {@link #getVersion()} and records which have
- * already been applied, so each runs exactly once.</p>
+ * <p>Rather than issuing raw SQL, it extends {@link BaseMigration} and describes the change in
+ * {@link #up(MigrationBuilder)} using the fluent {@code MigrationBuilder}: PolyDB turns the resulting
+ * operation into dialect-appropriate, parameterised SQL and applies it through the same executor as
+ * automatic migration (so this migration also participates in dry-run and SQL preview). Auto-migration
+ * creates the {@code users} table from the entity definitions; this migration then seeds it.</p>
  *
- * <p>This particular migration seeds a single fixed "SYSTEM" user into the {@code users} table so
- * the application always has a known account to fall back on.</p>
+ * <p>It inserts a single fixed "SYSTEM" user so the application always has a known account to fall back
+ * on. Legacy migrations that implement {@code Migration} and write raw SQL directly remain supported.</p>
  */
-public class V1_InitialDataMigration implements Migration {
+public class V1_InitialDataMigration extends BaseMigration {
 
     /** Ordering key. Migrations are applied in ascending version order and tracked individually. */
     @Override
@@ -33,16 +35,16 @@ public class V1_InitialDataMigration implements Migration {
     }
 
     /**
-     * Performs the migration. The {@link MigrationContext} hands us the {@link javax.sql.DataSource}
-     * to obtain a JDBC connection; here we simply run a single INSERT to create the system user.
-     * Try-with-resources guarantees the connection and statement are closed.
+     * Seeds the fixed system account declaratively. The values are bound as SQL parameters, so no
+     * hand-written, dialect-specific {@code INSERT} is required.
      */
     @Override
-    public void migrate(MigrationContext context) throws Exception {
-        try (Connection conn = context.getDataSource().getConnection();
-             Statement stmt = conn.createStatement()) {
-            // Insert a fixed-id system account that the rest of the application can rely on.
-            stmt.execute("INSERT INTO users (id, username, email, created_at) VALUES ('00000000-0000-0000-0000-000000000000', 'SYSTEM', 'system@polydb.org', NOW())");
-        }
+    public void up(MigrationBuilder m) {
+        m.seed("users").insert(row(
+                "id", UUID.fromString("00000000-0000-0000-0000-000000000000"),
+                "username", "SYSTEM",
+                "email", "system@polydb.org",
+                "created_at", LocalDateTime.now()
+        ));
     }
 }
