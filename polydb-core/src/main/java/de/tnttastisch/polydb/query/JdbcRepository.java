@@ -30,7 +30,7 @@ import java.util.stream.Collectors;
  * @param <T>  the entity type this repository manages
  * @param <ID> the type of the entity's {@code @Id} field
  */
-public final class JdbcRepository<T, ID> implements PagingAndSortingRepository<T, ID> {
+public final class JdbcRepository<T, ID> implements PagingAndSortingRepository<T, ID>, SpecificationExecutor<T> {
 
     /** Eager relations are resolved this many levels deep from the root entity. */
     private static final int DEFAULT_DEPTH = 1;
@@ -155,6 +155,50 @@ public final class JdbcRepository<T, ID> implements PagingAndSortingRepository<T
             orders.add(new Order(field.getColumnName(), order.getDirection(), order.isIgnoreCase()));
         }
         return orders;
+    }
+
+    // ------------------------------------------------------------------ specifications
+
+    @Override
+    public Optional<T> findOne(Specification<T> spec) {
+        List<T> result = findWhere(conditionOf(spec), null, 1L, null);
+        return result.isEmpty() ? Optional.empty() : Optional.of(result.get(0));
+    }
+
+    @Override
+    public List<T> findAll(Specification<T> spec) {
+        return findWhere(conditionOf(spec), null, null, null);
+    }
+
+    @Override
+    public List<T> findAll(Specification<T> spec, Sort sort) {
+        return findWhere(conditionOf(spec), toOrders(sort), null, null);
+    }
+
+    @Override
+    public Page<T> findAll(Specification<T> spec, Pageable pageable) {
+        Condition condition = conditionOf(spec);
+        List<Order> orders = toOrders(pageable.getSort());
+        if (orders.isEmpty()) {
+            orders = List.of(Order.asc(idField.getColumnName()));
+        }
+        List<T> content = findWhere(condition, orders, (long) pageable.getPageSize(), pageable.getOffset());
+        return new PageImpl<>(content, pageable, countWhere(condition));
+    }
+
+    @Override
+    public long count(Specification<T> spec) {
+        return countWhere(conditionOf(spec));
+    }
+
+    @Override
+    public boolean exists(Specification<T> spec) {
+        return existsWhere(conditionOf(spec));
+    }
+
+    /** Turns a specification into a condition, resolving properties through a root bound to this repository. */
+    private Condition conditionOf(Specification<T> spec) {
+        return spec == null ? null : spec.toCondition(new RepositoryRoot<>(this));
     }
 
     @Override
