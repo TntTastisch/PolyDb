@@ -56,19 +56,25 @@ public class HistoryRepository {
     public void ensureHistoryTable() {
         try (Connection conn = dataSource.getConnection()) {
             DatabaseMetaData meta = conn.getMetaData();
-            if (!historyTableExists(meta)) {
+            // Scope metadata lookups to the connection's current catalog/schema so a same-named history
+            // table in another database (visible to the JDBC user) is not mistaken for this database's
+            // table. The DDL/DML below uses unqualified names and thus targets this database, so the
+            // existence check must be scoped the same way to stay consistent.
+            String catalog = conn.getCatalog();
+            String schema = conn.getSchema();
+            if (!historyTableExists(meta, catalog, schema)) {
                 createHistoryTable(conn);
             } else {
-                ensureExtendedColumns(conn, meta);
+                ensureExtendedColumns(conn, meta, catalog, schema);
             }
         } catch (SQLException e) {
             throw new PolyDBException("Failed to ensure history table", e);
         }
     }
 
-    private boolean historyTableExists(DatabaseMetaData meta) throws SQLException {
+    private boolean historyTableExists(DatabaseMetaData meta, String catalog, String schema) throws SQLException {
         String pattern = storagePattern(meta);
-        try (ResultSet rs = meta.getTables(null, null, pattern, null)) {
+        try (ResultSet rs = meta.getTables(catalog, schema, pattern, new String[]{"TABLE"})) {
             while (rs.next()) {
                 if (TABLE_NAME.equalsIgnoreCase(rs.getString("TABLE_NAME"))) {
                     return true;
@@ -109,9 +115,9 @@ public class HistoryRepository {
     }
 
     /** Adds any extended column that is not yet present, preserving existing history rows. */
-    private void ensureExtendedColumns(Connection conn, DatabaseMetaData meta) throws SQLException {
+    private void ensureExtendedColumns(Connection conn, DatabaseMetaData meta, String catalog, String schema) throws SQLException {
         Set<String> existing = new HashSet<>();
-        try (ResultSet rs = meta.getColumns(null, null, storagePattern(meta), null)) {
+        try (ResultSet rs = meta.getColumns(catalog, schema, storagePattern(meta), null)) {
             while (rs.next()) {
                 existing.add(rs.getString("COLUMN_NAME").toLowerCase());
             }
